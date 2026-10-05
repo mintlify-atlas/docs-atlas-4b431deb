@@ -1,7 +1,7 @@
 ---
 title: "Survivor Roster: Abilities, Passives, and Configuration"
 sidebarTitle: "Survivors"
-description: "A complete reference for all five Shattered Reality Survivors — their ability sets, passive mechanics, sprint tuning, and key config values sourced directly from the game."
+description: "A complete reference for all five Shattered Reality Survivors — their ability sets, passive mechanics, sprint tuning, and key config values."
 ---
 
 Survivors must escape or outlast the Killer each round. Where Killers rely on high health and burst pressure, Survivors trade durability for speed and utility — their abilities skew toward evasion, self-sustain, and disrupting the Killer's momentum. Each Survivor has a `Class` archetype, a unique `AbilityInfo` table, and a `SprintConfig` tuned for their intended role.
@@ -17,7 +17,7 @@ Survivors must escape or outlast the Killer each round. Where Killers rely on hi
     **Display Name:** Kane — *The Fierce Combatant*
     **Class:** Sentinel | **MaxHealth:** 95 | **Price:** 0
 
-    Kane is currently a special-access Survivor (marked `disabled_actors` in `Characters.luau`). He features a unique **stance-switch** system — two distinct move sets called **Agile** and **Aggressive** — each with its own overriding `SprintConfig`. His loadout consists of melee and ranged options: Bonebreaker (axe), Deadshot (pistol), and Swift Flick (parkour dash).
+    Kane is currently a special-access Survivor (marked `disabled_actors` in `Characters.luau`). He features a unique **stance-switch** system — two distinct move sets called **Agile** and **Aggressive** — each with its own overriding `SprintConfig`. His active loadout consists of melee and ranged options: Bonebreaker (axe), Deadshot (pistol), and Swift Flick (parkour dash).
 
     ### Default Sprint Configuration
 
@@ -223,7 +223,7 @@ Survivors must escape or outlast the Killer each round. Where Killers rely on hi
     **Display Name:** Vintage — *The Starlight Pursuer*
     **Class:** Survivalist | **MaxHealth:** 100 | **Price:** 0
 
-    Nova (folder name `Nova`, display name "Vintage") is the standard Vintage Survivor character. She is one of the two default unlocked Survivors and shares her display name with `!Vintage` — the two are distinct characters with very different stat profiles. Nova's sole ability is a self-heal that locks her movement during the animation.
+    Nova (folder name `Nova`, display name "Vintage") is the standard Vintage Survivor character. She shares her display name with `!Vintage` — the two are distinct characters with very different stat profiles. Nova's sole ability is a self-heal that locks her movement during the animation.
 
     ### Sprint Configuration
 
@@ -263,7 +263,7 @@ Survivors must escape or outlast the Killer each round. Where Killers rely on hi
     **Display Name:** Vintage — *The Starlight Pursuer*
     **Class:** Survivalist | **MaxHealth:** 500 | **Price:** 0
 
-    `!Vintage` is a special-access variant of the Vintage character with dramatically amplified stats and a three-ability loadout. With **500 health**, vastly boosted stamina, and a much faster walk speed, this character is designed for premium or developer-only use rather than standard public matchmaking.
+    `!Vintage` is a special-access variant of the Vintage character with dramatically amplified stats and a three-ability loadout. With **500 health**, vastly boosted stamina, and a much faster walk speed, this character is granted to all new players via `DEFAULT_ACTORS` (DataService uses the string `"Vintage"`, which resolves to this folder via fuzzy name matching). Despite being broadly granted, its stats are tuned for non-standard use rather than regular public matchmaking.
 
     ### Sprint Configuration
 
@@ -279,7 +279,7 @@ Survivors must escape or outlast the Killer each round. Where Killers rely on hi
     ```
 
     <Warning>
-      `!Vintage`'s `MaxHealth = 500` and `Stamina = 250` far exceed any Killer's expected damage output per engagement. This character requires a `CharacterAccessOverride` to unlock and is not intended for standard play.
+      `!Vintage`'s `MaxHealth = 500` and `Stamina = 250` far exceed any Killer's expected damage output per engagement. These values are designed for specialised use rather than standard public matchmaking.
     </Warning>
 
     ### Abilities
@@ -315,6 +315,7 @@ Survivors must escape or outlast the Killer each round. Where Killers rely on hi
           HealAmount   = 54,
           VFXDelay     = 0.2,
           VFXDuration  = 3,
+          SoundDelay   = 0.275,
           HealDelay    = 2.185,
           LockMovement = true,
       },

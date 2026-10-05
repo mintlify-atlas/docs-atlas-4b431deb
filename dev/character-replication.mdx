@@ -1,7 +1,7 @@
 ---
 title: "Character Replication: Syncing Positions Across Clients"
 sidebarTitle: "Character Replication"
-description: "How Shattered Reality keeps every character's ServerHitbox in sync across all clients using client-authoritative position packets, velocity prediction, and lag compensation snapshots."
+description: "How Shattered Reality syncs every ServerHitbox across clients with client-authoritative position packets, velocity prediction, and lag-compensation."
 ---
 
 Character Replication is the subsystem responsible for keeping every player's `ServerHitbox` part in sync across all connected clients. Rather than relying on Roblox's built-in network ownership and physics replication — which introduces variable lag and can be manipulated — Shattered Reality uses a bespoke pipeline where each client sends its own position as a compact binary packet, the server verifies and forwards it, and every other client reconstructs a smoothed, wall-clipped estimate of where that character is right now.
@@ -72,7 +72,7 @@ The server service listens on `CommunicatePos` and performs layered validation b
     Rejects timestamps outside ±10¹² seconds to prevent time-based exploits.
   </Step>
   <Step title="Velocity clamping">
-    Velocity vectors that exceed `MaxVelocityStuds = 120` are clamped to their unit direction scaled to 120 rather than rejected outright — preserving direction while preventing speed abuse.
+    Velocity components that individually exceed `MaxVelocityStuds = 120` studs·s⁻¹ in absolute value cause the packet to be rejected outright. If all components pass but the overall magnitude still exceeds 120, the vector is clamped to its unit direction scaled to 120, preserving direction while preventing speed abuse.
   </Step>
 </Steps>
 

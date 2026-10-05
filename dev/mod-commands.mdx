@@ -1,7 +1,7 @@
 ---
-title: "Moderation Commands: Admin Panel Reference"
+title: "Moderation Commands: In-Game Admin Panel Reference"
 sidebarTitle: "Mod Commands"
-description: "Complete reference for all 26 admin panel commands, covering required rank, allowed server types, inputs, and execution behaviour for player management, round control, and testing."
+description: "Reference for all mod panel commands: required rank, allowed server types, inputs, and execution behaviour for player management and round control."
 ---
 
 The mod panel is an in-game interface accessible to players whose account rank meets or exceeds `Moderator`, or to anyone in a private server or the place owner's session. Commands are loaded dynamically from the `Commands` folder at runtime — each `ModuleScript` exports a definition table and an `Execute` function. `ModPanelService` validates rank, server context, and payload before dispatching execution and logging the result to `WebhookService`.

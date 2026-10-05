@@ -63,17 +63,20 @@ Reward payouts differ accordingly. Killers who win earn 40 Cash and 15 Character
   </Step>
 
   <Step title="Preparing">
-    When the countdown hits zero (or an admin calls `EndIntermission`), `BeginRoundFlow` is invoked. A gamemode is selected via `RoundUtil:SelectGamemode`, a session object is constructed, and actors are pre-warmed with `RoundUtil:WarmRoundActors`. `RoundStage` becomes `"Preparing"`.
+    When the countdown hits zero (or an admin calls `EndIntermission`), `BeginRoundFlow` is invoked. A gamemode is selected via `RoundUtil:SelectGamemode`, a session object is constructed, and actors are pre-warmed with `RoundUtil:WarmRoundActors`. `RoundStage` becomes `"Preparing"` while `RoundPhase` remains `"Intermission"`.
 
     ```lua
-    -- Session fields created at this point
+    -- Core session fields created at this point
     {
-        CurrentGamemode = gamemode,
-        RoundRoster     = roster,
-        AllowSoloRound  = allowSoloRound,
-        Time            = 0,            -- filled in StartRound
-        TimePast        = 0,
-        Participants    = {},
+        CurrentGamemode         = gamemode,
+        RoundRoster             = roster,
+        AllowSoloRound          = allowSoloRound,
+        Time                    = 0,      -- filled in StartRound
+        TimePast                = 0,
+        ActualTimePast          = 0,
+        LastManStanding         = false,
+        Participants            = {},
+        ParticipantConnections  = {},
     }
     ```
   </Step>
@@ -83,7 +86,7 @@ Reward payouts differ accordingly. Killers who win earn 40 Cash and 15 Character
   </Step>
 
   <Step title="ActorsReady">
-    Once the map is loaded, `RoundUtil:InitGamemode` calls `Mode:StartRound(context, session)` on the selected gamemode, which selects the killer(s), creates survivor actors, and returns a runtime object. `RoundStage` becomes `"ActorsReady"` and round metadata is broadcast via `RoundUtil:SetRoundMetadata`.
+    Once the map is loaded, `RoundUtil:InitGamemode` calls the selected gamemode's `StartRound` method, which selects the killer(s), creates survivor actors, and returns a runtime object. `RoundStage` becomes `"ActorsReady"` and round metadata is broadcast via `RoundUtil:SetRoundMetadata`.
   </Step>
 
   <Step title="ActiveRound">

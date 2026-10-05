@@ -1,7 +1,7 @@
 ---
 title: "Bezier Projectiles: Curved Physics-Based Attacks"
 sidebarTitle: "Projectiles"
-description: "How Shattered Reality fires, tracks, and replicates projectiles using BezierProjectile curves, server-authoritative ProjectileService, and client-side ProjectileReplicationManager."
+description: "How Shattered Reality fires and replicates projectiles via Bézier curves, server-authoritative ProjectileService, and ProjectileReplicationManager."
 ---
 
 Shattered Reality's projectile system handles everything from John Doe's `Impale` spike that travels in a straight line at 125 studs per second to arcing abilities that follow quadratic Bézier curves. All projectiles are owned and authoritative on the server. Clients receive a creation payload and run a parallel simulation to drive visuals, while hit registration happens exclusively on the server via the existing hitbox pipeline.

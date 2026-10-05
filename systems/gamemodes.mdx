@@ -34,7 +34,7 @@ Any gamemode with `Mode.Weight = 0` is **not** part of the normal random rotatio
     | `Mode.Name` | `"Classic"` |
     | `Mode.MinPlayers` | `2` |
     | `Mode.RoundTime` | `140` seconds |
-    | `Mode.Weight` | *(unset — eligible for rotation)* |
+    | `Mode.Weight` | *(not set — eligible for rotation)* |
     | Killers | 1 |
 
     **Survivor goal:** Survive until time runs out, or complete map objectives.
@@ -77,7 +77,7 @@ Any gamemode with `Mode.Weight = 0` is **not** part of the normal random rotatio
     |---|---|---|
     | `MaxHealth` | 200 (if ≤ 2 survivors) / 100 otherwise | × 0.7 |
     | `Config.Damage` | — | × 0.75 |
-    | `SprintConfig.Stamina` | 150 | — |
+    | `SprintConfig.Stamina` | 150 | set to scaled `MaxStamina` |
     | `SprintConfig.MaxStamina` | 150 | × 0.8 |
     | `SprintConfig.SprintGain` | × 1.2 | — |
     | `DoubleTroubleSurvivorCooldownMultiplier` attribute | 0.9 | — |
@@ -95,8 +95,12 @@ Any gamemode with `Mode.Weight = 0` is **not** part of the normal random rotatio
             actor.Config.MaxHealth          = targetHealth
             humanoid.MaxHealth              = targetHealth
             humanoid.Health                 = targetHealth
+            character:SetAttribute("DoubleTroubleSurvivorCooldownMultiplier", 0.9)
             actor.Config.SprintConfig.Stamina    = 150
             actor.Config.SprintConfig.MaxStamina = 150
+            actor.Config.SprintConfig.SprintGain =
+                (actor.Config.SprintConfig.SprintGain or 20) * 1.2
+            character:SetAttribute("DefaultWalkSpeed", actor.Config.SprintConfig.WalkSpeed)
         elseif actor.ActorType == "Killer" then
             humanoid.MaxHealth              *= 0.7
             humanoid.Health                 *= 0.7
@@ -104,6 +108,7 @@ Any gamemode with `Mode.Weight = 0` is **not** part of the normal random rotatio
             actor.Config.SprintConfig.MaxStamina =
                 (actor.Config.SprintConfig.MaxStamina
                     or actor.Config.SprintConfig.Stamina or 100) * 0.8
+            actor.Config.SprintConfig.Stamina = actor.Config.SprintConfig.MaxStamina
         end
     end
     ```

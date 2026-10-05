@@ -1,7 +1,7 @@
 ---
 title: "Killer Roster: Abilities, Classes, and Configuration"
 sidebarTitle: "Killers"
-description: "A complete reference for all five Shattered Reality Killers — their ability sets, class archetypes, sprint tuning, and key config values sourced directly from the game."
+description: "A complete reference for all five Shattered Reality Killers — their ability sets, class archetypes, sprint tuning, and key config values."
 ---
 
 Killers are the asymmetric threat in every Shattered Reality round. A single Killer faces the entire Survivor team, compensating with a dramatically higher health pool, powerful offensive abilities, and pursuit-focused movement mechanics. Each Killer belongs to a design **Class** that describes their playstyle archetype, and every Killer config is loaded from `ReplicatedStorage/Characters/Killers/<Name>/Config/`.
@@ -294,7 +294,7 @@ Killers are the asymmetric threat in every Shattered Reality round. A single Kil
       ```
     </Accordion>
 
-    <Accordion title="Tactical Recall (Ability2) — Cooldown: 25s / 20s on hit">
+    <Accordion title="Tactical Recall (Ability2) — DefaultCooldown: 25s / SurvivorHitCooldown: 20s">
       Hurls a sign at 110 studs/s then reels it back, dealing `KickDamage = 35` if it catches a Survivor on the return. The cooldown is reduced to 20 s when the return pass hits a Survivor.
 
       ```lua

@@ -28,7 +28,7 @@ local DEFAULT_ACTORS = {
 }
 ```
 
-`JohnDoe` is the default equipped Killer and `Brickbattler` is the default equipped Survivor. Any actor whose folder name starts with `!` (such as `!Pursuer` or `!Vintage`) is treated as a special-access character — the leading `!` is stripped during fuzzy-name resolution and the character will not appear in the standard roster unless a `CharacterAccessOverride` is set on the player's data.
+`JohnDoe` is the default equipped Killer and `Brickbattler` is the default equipped Survivor. Note that `"Vintage"` in `DEFAULT_ACTORS` resolves to the `!Vintage` character folder via fuzzy name matching (the `!` prefix is stripped during normalisation). Any actor whose folder name starts with `!` (such as `!Pursuer`) that is **not** listed in `DEFAULT_ACTORS` will not appear in the standard roster unless a `CharacterAccessOverride` is set on the player's data.
 
 ## Character Folder Structure
 

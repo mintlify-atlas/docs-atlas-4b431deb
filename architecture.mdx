@@ -1,5 +1,5 @@
 ---
-title: "Shattered Reality Codebase Architecture Overview"
+title: "Shattered Reality: Full Codebase Architecture Overview"
 sidebarTitle: "Architecture"
 description: "A complete map of Shattered Reality's folder layout, the server/client module split, and how services, characters, and infrastructure connect at runtime."
 ---
@@ -14,7 +14,7 @@ Shattered Reality is organized as a file-based Rojo project spread across five R
   | Sub-folder | Purpose |
   |---|---|
   | `Modules/Shared/` | Modules that run on **both** the server and the client (hitboxes, status effects, DeltaNetwork, character replication, ragdoll, core utilities) |
-  | `Modules/Main/` | Modules that are **client-only** — managers, features, helpers, and UI packages loaded exclusively by `Client.local.luau` |
+  | `Modules/Main/` | Modules that are **client-only** — managers, features, and helpers loaded exclusively by `Client.local.luau` |
   | `Characters/` | Per-character data: `Config.luau`, `Manager.luau`, and `Abilities/` (split into `Client` and `Server` sub-folders) |
   | `Assets/` | Skin configs (`Skins/`), emote definitions (`Emotes/`), and the top-level `Assets` init module |
   | `Starter.luau` | The shared module loader — used by both `Server.server.luau` and `Client.local.luau` to require, init, and start ordered lists of modules |
@@ -27,20 +27,20 @@ Shattered Reality is organized as a file-based Rojo project spread across five R
   |---|---|
   | `Modules/Services/` | Game-logic services: `RoundService`, `ActorService`, `DataService`, `PlayerService`, `RewardsService`, `StatusEffectsService`, `ProjectileService`, `EmoteService`, `FootstepsService`, `VoiceEffectService`, `WebhookService`, `ModPanelService`, `DialogueService`, `CharacterReplication` |
   | `Modules/Infrastructure/` | Cross-cutting server concerns: `Anticheat`, `Commands`, `SoftShutdown`, `ClientAssets` |
-  | `Modules/Gameplay/` | Server-side gameplay helpers (combat clashing, role selectors) |
+  | `Modules/Gameplay/` | Server-side gameplay helpers (combat clashing) |
   | `Server.server.luau` | The server entry point — initializes DeltaNetwork, loads testing assets, queues and boots all service modules |
 </Accordion>
 
 <Accordion title="StarterPlayerScripts">
-  Runs once per player on the client. Contains `Client.local.luau` (the client bootstrap), `CustomShiftLock`, `PlayerModule`, and `Animate.local.luau`.
+  Runs once per player on the client. Contains `Client.local.luau` (the client bootstrap), `CustomShiftLock`, and `PlayerModule`.
 </Accordion>
 
 <Accordion title="StarterCharacterScripts">
-  Character-local scripts: `DirectionalMovement.local.luau`, `Health.local.luau`, `RagdollFix.local.luau`.
+  Character-local scripts: `Animate.local.luau`, `DirectionalMovement.local.luau`, `Health.local.luau`, `RagdollFix.local.luau`.
 </Accordion>
 
 <Accordion title="ReplicatedFirst">
-  Loads before the game is fully replicated. Holds loading screen bootstraps (`LoadingScreenBootstrap.local.luau`, `LoadingScreenMobileBootstrap.local.luau`), `DisableShiftLock.local.luau`, `UIStrokeScale.local.luau`, and the `SelectableMaps` folder.
+  Loads before the game is fully replicated. Holds loading screen bootstraps (`LoadingScreenBootstrap.local.luau`, `LoadingScreenMobileBootstrap.local.luau`), `DisableShiftLock.local.luau`, and `UIStrokeScale.local.luau`.
 </Accordion>
 
 ---
@@ -51,15 +51,14 @@ Shattered Reality is organized as a file-based Rojo project spread across five R
 
 ```
 Shared/
-├── Core/           -- Maid, Util, Assets, Characters catalog, RankUtil, Abilities, Passives
+├── Core/           -- Maid, Util, Assets, Characters catalog, RankUtil
 ├── Gameplay/       -- Hitboxes, StatusEffects, CharacterReplication, BezierProjectile,
-│                      Ragdoll, SurvivorHighlights, Visuals, Hitindicator
+│                      Ragdoll, SurvivorHighlights, Visuals, Hitindicator, ActorAssets
 ├── Network/        -- DeltaNetwork (typed remotes), ActorNetwork, PosSerdes
 ├── Packages/       -- Third-party packages: Signal, ProfileStore, etc.
-├── Player/         -- Animations, ChatTags, ChatDisable, HeadLook, DynamicCamera,
-│                      AutoHeadCamSubject, UI menus (Emotes, PlayerList, Spectating,
-│                      ModPanel, Settings), UI misc (LowHealthOverlay, SurvivorDisplay, …)
-└── ActorAssets/    -- Shared actor asset references
+└── Player/         -- Animations, ChatTags, ChatDisable, HeadLook, DynamicCamera,
+                       AutoHeadCamSubject, UI menus (Emotes, PlayerList, Spectating,
+                       ModPanel, Settings), UI misc (LowHealthOverlay, SurvivorDisplay, …)
 ```
 
 ### Main/ — Client-Only
@@ -73,13 +72,8 @@ Main/
 │                      MultiplierManager, LMSManager
 ├── Features/       -- Loading screen, ExtraUIs, HitboxVisualizer, LockOnHead,
 │                      ServerIdentityLabel, SoftShutdown client-side
-├── Helper/         -- ForgeVFX, EffectHelpers, Notifications, UIController,
-│                      UtilityRemotes, CustomShiftLock
-├── Gameplay/       -- Client gameplay helpers
-├── Network/        -- Client networking helpers
-├── Core/           -- Client-side core utilities
-├── Player/         -- Client player utilities
-└── Packages/       -- Client-scoped packages
+└── Helper/         -- ForgeVFX, EffectHelpers, Notifications, UIController,
+                       UtilityRemotes, CustomShiftLock
 ```
 
 ---
@@ -131,9 +125,8 @@ Infrastructure/
 │   ├── init.luau               -- Anticheat entry point; exposes validation API to services
 │   ├── AbilityRequestValidator.luau
 │   ├── PayloadSanitizer.luau
-│   ├── Checks/                 -- Individual rule modules
-│   ├── Policies.luau           -- Per-character or per-ability policy tables
-│   └── Validation.luau         -- Low-level type and bounds checking
+│   └── Checks/                 -- Individual rule modules (Backshotting, Flinging,
+│                                  Flying, Noclipping, SpeedHacking)
 ├── Commands/                   -- 20+ admin/debug commands (BanPlayer, ForceNextGamemode,
 │                                  SpawnCharacter, GiveStatus, SetPlayerRole, …)
 └── SoftShutdown.luau           -- Graceful shutdown with player notification

@@ -1,5 +1,5 @@
 ---
-title: "Adding a New Survivor to Shattered Reality"
+title: "Adding a New Survivor Character to Shattered Reality"
 sidebarTitle: "New Survivor"
 description: "Step-by-step guide to creating a Survivor character with active abilities, passive configs, voicelines, and DataService registration for Shattered Reality."
 ---
@@ -7,7 +7,7 @@ description: "Step-by-step guide to creating a Survivor character with active ab
 Survivors follow the same folder convention as Killers, but their Config modules omit the `ChaseConfig` block and use survivor-specific ability types. Each Survivor lives under `ReplicatedStorage/Characters/Survivors/` and is automatically discovered by the character catalog at runtime — no manual registration in a central list is required beyond adding the character to DataService's purchased and visible tables.
 
 <Note>
-  The `!Vintage` survivor uses the flat-file layout (`Config.luau` / `Manager.luau` at the folder root). The `!` prefix is a Studio sort trick and has no effect at runtime. For new characters, the subfolder style used by **Brickbattler** (`Config/init.luau`, `Manager/init.luau`) is recommended because it lets you co-locate VFX instances and helper modules inside the Config or Manager folders.
+  Some survivors use a flat-file layout (`Config.luau` / `Manager.luau` at the folder root). For new characters, the subfolder style used by **Brickbattler** (`Config/init.luau`, `Manager/init.luau`) is recommended because it lets you co-locate VFX instances and helper modules inside the Config or Manager folders.
 </Note>
 
 ## Folder structure
@@ -56,7 +56,7 @@ return {
         DisplayName = "Your Survivor",
         Description = "Short tagline shown in the character select screen.",
     },
-    Class     = "Sentinel",  -- e.g. "Sentinel", "Skirmisher", etc.
+    Class     = "Sentinel",
     Price     = 0,
     NormalRender      = "",
     TransparentRender = "",
@@ -79,18 +79,8 @@ return {
         SprintGain  = 24.5,
     },
 
-    -- Optional: passive abilities that are always active.
-    -- PassiveInfo = {
-    --     MyPassive = {
-    --         Name        = "Passive Name",
-    --         Description = "What the passive does.",
-    --         -- ability-specific fields…
-    --     },
-    -- },
-
     AbilityInfo = {
         -- "Ability1" through "Ability5" are the supported active-ability types.
-        -- There is no "AbilityM1" for survivors.
         PiercingDash = {
             Name                  = "Piercing Dash",
             Cooldown              = 30,
@@ -146,7 +136,7 @@ return {
   | `"Ability2"` | Second active ability |
   | `"Ability3"` | Third active ability |
   | `"Ability4"` | Fourth active ability |
-  | `"Ability5"` | Fifth active ability (charge-based, e.g. Deadshot) |
+  | `"Ability5"` | Fifth active ability (charge-based, e.g. Kane's Deadshot) |
 
   `LayoutOrder` controls the horizontal order of ability icons in the HUD; lower values appear further left.
 </Accordion>

@@ -1,7 +1,7 @@
 ---
-title: "Anticheat: Server-Side Exploit Detection System"
+title: "Anticheat: Server-Side Exploit Detection for Games"
 sidebarTitle: "Anticheat"
-description: "Modular server-side anticheat with five built-in checks (SpeedHacking, Flying, Noclipping, Flinging, Backshotting), violation reporting, and a custom-check API."
+description: "Server-side anticheat for Shattered Reality with five built-in detection checks, violation reporting callbacks, and a custom-check registration API."
 ---
 
 Shattered Reality's anticheat runs entirely on the server, polling every connected player on each `Heartbeat` frame. It ships with five built-in detection modules, each following the same `BaseCheck` contract, and exposes a simple API for registering additional checks at runtime. Violations accumulate per-player and trigger a configurable `OnViolation` callback before issuing a kick.
@@ -257,9 +257,9 @@ end
 `AbilityRequestValidator` wraps an optional `AbilityThrottle` rate-limiter to block ability-fire spam. `Validate` performs these checks in order:
 
 1. Player has a loaded character that is not emoting
-2. `actor` exists and `actor:CanUseAbility()` returns true
+2. `actor` exists
 3. The throttle key `"{UserId}:{abilityName}"` is allowed by `AbilityThrottle:Allow(key)`
-4. `actor.AbilitiesDisabled ~= true`
+4. `actor.AbilitiesDisabled ~= true` and `actor:CanUseAbility()` returns true
 5. No active cancel-context is blocking the ability
 6. The ability name resolves to a known ability in `actor.AbilityManager`
 

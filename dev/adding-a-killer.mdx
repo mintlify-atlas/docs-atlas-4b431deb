@@ -1,5 +1,5 @@
 ---
-title: "Adding a New Killer to Shattered Reality"
+title: "Adding a New Killer Character to Shattered Reality"
 sidebarTitle: "New Killer"
 description: "Step-by-step guide to creating a new Killer character, covering the Config module, Manager init, and Server/Client ability scripts for Shattered Reality."
 ---
@@ -175,9 +175,8 @@ return {
   |-------|-------------|
   | `"Rushdown"` | High-mobility, aggressive melee killers (e.g. JohnDoe) |
   | `"Chaser"` | Sustained-pursuit killers with tracking or slow utilities (e.g. !Pursuer) |
-  | `"Killer"` | Generic fallback; use when no other archetype applies |
 
-  You can introduce a new string value freely — nothing will break — but existing UI strings only cover the values above.
+  You can introduce a new string value freely — nothing will break — but the UI only has display strings for the values listed above.
 </Accordion>
 
 ### Create `Manager/init.luau`
@@ -232,6 +231,7 @@ local Sounds   = require(ReplicatedStorage.Modules.Main.Managers.SoundManager)
 local Util     = require(ReplicatedStorage.Modules.Shared.Core.Util)
 local StatusEffects = require(game.ServerScriptService.Modules.Services.StatusEffectsService)
 local AbilityCancel = require(ReplicatedStorage.Modules.Main.Managers.AbilityManager.Abilities)
+local ActorService  = require(game.ServerScriptService.Modules.Services.ActorService)
 
 local MyAbility = {}
 
@@ -378,7 +378,7 @@ local DEFAULT_VISIBLE = {
 Also update the `Template.PurchasedKillers` array in the same file so existing accounts receive the new character on their next login:
 
 ```lua
-PurchasedKillers = { "JohnDoe", "c00lkidd", "YourKillerName" },
+PurchasedKillers = { "JohnDoe", "YourKillerName" },
 ```
 
 ### (Optional) Add a skin
@@ -407,9 +407,9 @@ The `Characters` module merges the skin config on top of the base config at runt
 
 ---
 
-## Reference: JohnDoe's Slash — full server script
+## Reference: JohnDoe's Slash — annotated server script
 
-The following is the actual `Server.luau` for JohnDoe's Slash ability. Study it to understand the complete hitbox lifecycle, cancel context, speed-bonus application, and death-launch logic:
+The following is a representative version of `Server.luau` for JohnDoe's Slash ability, showing the complete hitbox lifecycle, cancel context, speed-bonus application, and death-launch logic. The production file also includes a `stopStaleSlashTracks` helper and optional perks integration, but the core pattern below covers everything you need for your own M1:
 
 ```lua
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

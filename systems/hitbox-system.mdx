@@ -1,7 +1,7 @@
 ---
 title: "Hitbox System: Lag-Compensated Combat Detection"
 sidebarTitle: "Hitbox System"
-description: "Architecture guide for Shattered Reality's hitbox pipeline—covering CastSystem sweep logic, ClientSnapshots rewind buffering, HitboxWorld tick loop, and Execution."
+description: "Architecture guide for Shattered Reality's hitbox pipeline—CastSystem sweeps, ClientSnapshots lag compensation, HitboxWorld tick loop, and Execution."
 ---
 
 Shattered Reality's hitbox system is a server-authoritative, lag-compensated combat detection pipeline. Rather than trusting purely client-reported positions, the server maintains a rolling buffer of each player's character CFrames, rewinds that buffer by the player's measured network ping, and sweeps the hitbox volume through intermediate positions between ticks. This catches fast-moving hits that a single per-frame overlap check would miss, while keeping the server in full control of damage application.

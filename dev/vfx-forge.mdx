@@ -1,7 +1,7 @@
 ---
-title: "ForgeVFX: Visual Effects Library for Abilities"
+title: "ForgeVFX: Ability Visual Effects Library (VFX-DL v1.0)"
 sidebarTitle: "ForgeVFX"
-description: "ForgeVFX (VFX-DL v1.0) is the visual effects engine powering beams, shockwaves, camera shake, particles, screen effects, and mesh animations for all ability VFX in Shattered Reality."
+description: "ForgeVFX (VFX-DL v1.0) is the effects engine for Shattered Reality: beams, shockwaves, camera shake, particles, screen overlays, and mesh animations."
 ---
 
 ForgeVFX is a third-party Roblox VFX library authored by `zilibobi` and licensed under the **VFX Forge Developer License (VFX-DL) v1.0**. Shattered Reality uses it as the backbone for all ability visual effects — from JohnDoe's pounce slam to shockwave rings that project onto geometry. The library is located at `ReplicatedStorage/Modules/Main/Helper/ForgeVFX/` and is initialised once on the client via `api.init()`.
@@ -171,7 +171,7 @@ local env = ForgeVFX.emit(1.5, particleEmitter, beamInstance)
 
 ## `api.setenabled(attachment, value, duration)`
 
-A convenience helper that enables or disables all `ParticleEmitter` children of an attachment. An optional `duration` parameter re-disables them after the specified time:
+A convenience helper that enables or disables all `ParticleEmitter` descendants of an attachment. An optional `duration` parameter re-disables them after the specified time:
 
 ```lua
 -- Enable particles for 3 seconds then auto-disable
@@ -196,7 +196,7 @@ Handlers.PouncePunch = function(Data)
     end
 
     VFXManager:FireVFXInParent(Data.VfxTemplate, {
-        Parent   = Data.VfxTemplate and HandPart,
+        Parent   = HandPart,
         Duration = Data.Duration,
     })
 end

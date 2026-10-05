@@ -1,7 +1,7 @@
 ---
 title: "Status Effects: Stackable Buffs and Debuffs"
 sidebarTitle: "Status Effects"
-description: "Reference for all 16 status effects in Shattered Reality, covering stacking rules, level tables, the module contract, and deep dives on complex ticking effects."
+description: "Reference for all 15 status effects in Shattered Reality—stacking rules, level tables, the module contract, and deep dives on ticking effects."
 ---
 
 Status effects are modular, time-limited state changes applied to any character in the game. Each effect lives in its own Luau module under `ReplicatedStorage/Modules/Shared/Gameplay/StatusEffects/` and exposes a uniform contract that the `StatusManager` (client) and `StatusEffectsService` (server) both consume. Effects can be positive buffs, negative debuffs, or purely cosmetic, and many support multiple levels that alter their potency.
@@ -49,7 +49,6 @@ Every status effect module exposes the following fields and functions:
 | Resistance | Positive | 10 | `TimeStackable = false` | Reduces incoming damage. |
 | Regeneration | Positive | 15 | `TimeStackable = false` | Restores health over time. |
 | Invisibility | Positive | 5 | `TimeStackable = false` | Makes the target translucent. |
-| Undetectable | Positive | 5 | `TimeStackable = false` | Reduces footstep volume. |
 
 ---
 
@@ -98,8 +97,6 @@ function Bleed.Tick(character, dt, status)
     })
 end
 ```
-
-JohnDoe's Impale ability applies Bleed with per-hit level and duration scaling: `BleedLevel * bleedScale` and `BleedDuration * bleedScale`, where `bleedScale` decreases by `BleedFalloffPerExtraHit` for each subsequent target pierced.
 
 ---
 
@@ -175,6 +172,7 @@ Corrupted lives in the `KillerSpecific` subfolder and is used exclusively by kil
 Corrupted.Kind     = "Negative"
 Corrupted.Duration = 10
 Corrupted.MaxLevel = 6
+Corrupted.TimeStackable = false
 Corrupted.Description = "Deals nonlethal corruption damage over time."
 
 Corrupted.Levels = {
@@ -197,7 +195,7 @@ These three multiplier effects write a single attribute that is consumed by the 
 
 | Effect | Attribute Set | Level Values |
 |---|---|---|
-| Resistance | `StatusResistanceMultiplier` | `1 - (level × 0.2)`, capped at 1.0 (max level 10 = full immunity) |
+| Resistance | `StatusResistanceMultiplier` | `1 - min(level × 0.2, 1.0)` — full damage immunity is reached at level 5 (reduction = 1.0) |
 | Strength | `StatusStrengthMultiplier` | `1.15`, `1.30`, `1.50` |
 | Weaken | `StatusWeakenMultiplier` | `0.85`, `0.70` |
 

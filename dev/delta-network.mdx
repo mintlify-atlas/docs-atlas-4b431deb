@@ -1,7 +1,7 @@
 ---
 title: "DeltaNetwork: Typed Roblox Remote Communication"
 sidebarTitle: "DeltaNetwork"
-description: "DeltaNetwork is a singleton wrapper around Roblox RemoteEvents and RemoteFunctions with typed argument validation, middleware, rate-limiting, and compressed serialisation types."
+description: "DeltaNetwork wraps Roblox remotes with typed validation, per-event middleware, per-player rate limiting, and retry logic behind a unified API."
 ---
 
 DeltaNetwork is Shattered Reality's in-house networking layer, built on top of Roblox's `RemoteEvent`, `UnreliableRemoteEvent`, and `RemoteFunction` primitives. It enforces type validation on every incoming message, supports per-event middleware chains, per-player rate limiting, and retry logic — all behind a clean, consistent API that works identically on server and client.
@@ -30,7 +30,7 @@ Every subsequent `require` of the module returns the same instance. This guarant
 | `UnreliableEvents` | `UnreliableRemoteEvent` instances |
 | `Functions` | `RemoteFunction` instances |
 
-The server always creates the folders; clients wait up to 10 seconds for them to replicate before falling back to creating their own local stubs.
+The server always creates the folders. On the client, `Events` and `Functions` folders are awaited for up to 1 second each before falling back to creating local stubs; `UnreliableEvents` is awaited for up to 10 seconds.
 
 ## Creating Events and Functions
 
@@ -90,16 +90,19 @@ Every argument position in a DeltaNetwork event is validated against one of thes
     Expects `typeof(v) == "table"`.
   </Card>
   <Card title="Delta.Buffer" icon="database">
-    Expects `typeof(v) == "buffer"`. Used by `PosSerdes` for packed position packets.
+    Expects `typeof(v) == "buffer"`. Used by the character replication pipeline for packed position packets produced by `PosSerdes`.
   </Card>
-  <Card title="Delta.Vector3F24" icon="arrows-up-down-left-right">
-    Accepts a `Vector3`. The `F24` suffix signals that callers should pack this value into 24-bit fixed-point via `PosSerdes` before sending.
+  <Card title="Delta.Vector3" icon="arrows-up-down-left-right">
+    Expects `typeof(v) == "Vector3"`. Also aliased as `Delta.Vector3F24`; the `F24` suffix is a semantic hint that callers should pack the value via `PosSerdes` before sending.
   </Card>
-  <Card title="Delta.CFrameF24U8" icon="cube">
-    Accepts a `CFrame`. The `F24U8` suffix signals position packed to 24-bit and rotation quantized to an 8-bit yaw by `PosSerdes`.
+  <Card title="Delta.CFrame" icon="cube">
+    Expects `typeof(v) == "CFrame"`. Also aliased as `Delta.CFrameF24U8`; the `F24U8` suffix signals position packed to 24-bit and rotation quantized to an 8-bit yaw by `PosSerdes`.
+  </Card>
+  <Card title="Delta.Color3" icon="palette">
+    Expects `typeof(v) == "Color3"`.
   </Card>
   <Card title="Delta.NumberF16" icon="wave-square">
-    Accepts a `number`. The `F16` suffix marks it as a half-precision float — callers should constrain the value range accordingly to avoid precision loss.
+    Accepts a `number`. An alias for `Delta.Number`; the `F16` suffix is a semantic annotation indicating callers should constrain the value range to avoid precision loss when the value is interpreted as half-precision.
   </Card>
   <Card title="Delta.Any" icon="asterisk">
     Bypasses type validation entirely. Use sparingly; prefer a concrete type when possible.

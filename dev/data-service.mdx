@@ -1,7 +1,7 @@
 ---
 title: "DataService: Player Data Persistence with ProfileStore"
 sidebarTitle: "DataService"
-description: "DataService wraps ProfileStore to persist per-player characters, skins, currency, keybinds, and 30+ validated settings with automatic save/load on join and leave."
+description: "ProfileStore-backed data layer for player currency, characters, skins, keybinds, and settings — server-validated and auto-saved on player join and leave."
 ---
 
 DataService is the single source of truth for all persistent player data in Shattered Reality. It wraps the community `ProfileStore` library to handle session management, reconciliation, and safe shutdown saves. On every player join the profile is loaded, normalized, and applied to the player's attributes so downstream systems can read settings from `player:GetAttribute("Setting_*")` without touching the data store directly.
@@ -212,7 +212,7 @@ DataService registers three `DeltaNetwork` functions:
 | Function | Direction | Description |
 |---|---|---|
 | `GetData` | Server → Client | Returns the player's full `{Data = ...}` table after normalization |
-| `GetSettings` | Server → Client | Returns `profile.Data` (settings slice) |
+| `GetSettings` | Server → Client | Returns the full `profile.Data` table (client reads `Data.Settings` from it) |
 | `SaveSettings` | Client → Server | Validates and persists a settings payload; returns `(bool, message)` |
 
 <Tip>
