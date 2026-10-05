@@ -1,47 +1,173 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Shattered Reality Development"
+sidebarTitle: "Quickstart"
+description: "Clone the repo, sync it into Roblox Studio with Rojo, configure the Testing attribute, and run a local two-player playtest in under ten minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+Getting a working local development environment for Shattered Reality takes only a few minutes. The project is structured as a file-based Rojo source tree — there is no monolithic `.rbxl` file checked into the repository. Instead, every script, module, and folder maps to a path on disk, and Rojo syncs them into Studio live. The steps below walk from a clean clone through your first successful two-player playtest.
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+<Note>
+  The `workspace.Testing` attribute controls which assets are loaded into the workspace at server startup. When set to `true`, `Server.server.luau` destroys any existing `TestLobby` and replaces it with `StudioAssets` — a stripped-down environment suitable for local testing. When `false` (production), the full `TestLobby` map is loaded instead. You can toggle this attribute at runtime; the server watches for the `GetAttributeChangedSignal("Testing")` event and refreshes assets automatically.
+</Note>
 
 ## Prerequisites
 
-Before you begin, you must have:
+Before you begin, make sure you have the following installed and ready:
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+- **Roblox Studio** — download from [roblox.com/create](https://www.roblox.com/create)
+- **Rojo** — the file-sync plugin for Studio ([rojo.space](https://rojo.space)); version 7.x is required
+- **Git** — to clone the repository
+- Basic familiarity with **Luau** syntax and Roblox Studio's Explorer/Properties panels
 
-## Get started
+---
+
+## Setup Steps
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Clone the repository">
+    Clone the Shattered Reality source repository to a local directory:
 
     ```bash
-    npm install your-package
+    git clone https://github.com/cenowillceno/SRCode.git
+    cd SRCode
+    ```
+
+    The root of the repo maps directly to the Roblox DataModel — you will see top-level folders like `ReplicatedStorage/`, `ServerScriptService/`, `StarterPlayerScripts/`, `StarterCharacterScripts/`, `ReplicatedFirst/`, and `ServerStorage/`.
+  </Step>
+
+  <Step title="Start the Rojo server">
+    From the repository root, start the Rojo development server:
+
+    ```bash
+    rojo serve
+    ```
+
+    Rojo will watch the source tree for file changes and expose a local sync endpoint (default `localhost:34872`). Keep this terminal open throughout your session.
+  </Step>
+
+  <Step title="Connect Studio to Rojo">
+    Open Roblox Studio to a **blank baseplate** project. In Studio, open the Rojo plugin panel and click **Connect**. Rojo will populate the Explorer with all folders and scripts from the repo, mapping each file path to the correct Roblox service:
+
+    | Disk path | Roblox service |
+    |---|---|
+    | `ReplicatedStorage/` | `game.ReplicatedStorage` |
+    | `ServerScriptService/` | `game.ServerScriptService` |
+    | `StarterPlayerScripts/` | `game.StarterPlayer.StarterPlayerScripts` |
+    | `StarterCharacterScripts/` | `game.StarterPlayer.StarterCharacterScripts` |
+    | `ReplicatedFirst/` | `game.ReplicatedFirst` |
+    | `ServerStorage/` | `game.ServerStorage` |
+
+    Verify the tree looks correct in the Explorer before proceeding.
+  </Step>
+
+  <Step title="Enable Testing mode">
+    In the Studio Explorer, select `Workspace`. In the **Properties** panel, find the **Attributes** section and set `Testing` to `true` (boolean).
+
+    This tells `Server.server.luau` to load `StudioAssets` into the workspace instead of the production `TestLobby`, giving you a minimal environment with no extraneous map geometry:
+
+    ```lua
+    -- Server.server.luau (excerpt)
+    local function loadTestingAssets()
+        local testing = workspace:GetAttribute("Testing")
+        local assets = ServerStorage:FindFirstChild("Assets")
+        local randomAssets = assets and assets:FindFirstChild("Random")
+
+        if testing == true then
+            local existingLobby = workspace:FindFirstChild("TestLobby")
+            if existingLobby then
+                existingLobby:Destroy()
+            end
+            replaceWorkspaceAsset(
+                randomAssets and randomAssets:FindFirstChild("StudioAssets"),
+                "StudioAssets"
+            )
+        else
+            -- production path: loads TestLobby
+            replaceWorkspaceAsset(testLobby, "TestLobby")
+        end
+    end
+
+    workspace:GetAttributeChangedSignal("Testing"):Connect(function()
+        print("[Testing] Testing changed; refreshing Workspace assets")
+        loadTestingAssets()
+    end)
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
+  <Step title="Hit Play — verify the server banner">
+    Press **Play** in Studio (solo mode). The server bootstrap runs `Server.server.luau`, which requires every service via `Starter:LoadModules`, calls each module's `Init()`, then prints the startup banner to the **Output** panel via `TestService:Message`.
+
+    Look for output resembling:
+
     ```
+          _____                    _____          
+         /\    \                  /\    \         
+        /:::\    \                /:::\    \        
+    ...
+
+    Successfully compiled the ShatteredCode Server Framework
+
+    Total time to compile: 1.84 seconds
+    Total components loaded: 17
+    Roblox Version: 0.623.1.6230491
+    Branch: STUDIO
+    Release: 2025-01-15T10:32:00Z
+
+    There was 0 module(s) that went past the threshold of 1 second(s):
+    ```
+
+    If you see loader errors in the Output, they will also be forwarded to any connected clients via the `LoaderErrorNotice` RemoteEvent and displayed as persistent on-screen notifications.
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
-    ```
+  <Step title="Add a second player to trigger round logic">
+    A round will not start with only one player. To test the full round lifecycle:
+
+    1. In Studio, go to the **Test** tab in the ribbon.
+    2. Set **Players** to `2` and click **Start** (or use **Local Server** mode).
+    3. Studio will open two client windows alongside the server. Once both clients join, `RoundService` detects the player count threshold and advances from `Intermission` → `Preparing` → `LoadingMap` → `ActorsReady` → `ActiveRound`.
+
+    Watch the Output for `RoundService` state transitions and `ActorService` actor-creation logs confirming that character configs were resolved and actors were spawned.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+---
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+## What Happens at Startup (Summary)
+
+```lua
+-- Server.server.luau — abridged bootstrap sequence
+ensureDeltaNetworkFolders()                          -- create DeltaNetwork/Events + Functions
+Delta.Function("GetMousePosition", ...)             -- register typed remote
+loadTestingAssets()                                 -- load StudioAssets or TestLobby
+
+queueDirectModules(services)                        -- RoundService, DataService, ActorService …
+queueDirectModules(infrastructure)                  -- Anticheat, Commands, SoftShutdown
+queueDirectModules(gameplay)                        -- combat, role selectors
+
+Starter:LoadModules(moduleQueue, "ServerSystems", {
+    CallInit = true,
+    CallStart = false,
+    CompileThreshold = compile_threshold,           -- warn if any module takes > 1 second
+    OnError = function(kind, moduleScript, err) … end,
+})
+
+report_compile("ShatteredCode Server Framework")    -- print banner + timing stats
+workspace:SetAttribute("GameLoaded", true)          -- signal clients that server is ready
+```
+
+<Tip>
+  The Shattered Reality codebase is substantial. According to VSCodeCounter stats, `ReplicatedStorage` alone contains **174 Lua files** totalling roughly **18,000 lines of code**. If Studio's compile time feels slow on your first run, that is normal — Rojo's file watcher and Roblox's script compilation pipeline both need a moment to process the full tree. Subsequent runs will be faster thanks to Studio's module cache.
 </Tip>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Map out every folder, understand the server/client split, and see which modules live where.
+  </Card>
+  <Card title="Round Lifecycle" icon="rotate" href="/systems/round-lifecycle">
+    Trace a full match from intermission countdown through actor spawn, active round, and cleanup.
+  </Card>
+</CardGroup>

@@ -1,0 +1,477 @@
+---
+title: "Moderation Commands: Admin Panel Reference"
+sidebarTitle: "Mod Commands"
+description: "Complete reference for all 26 admin panel commands, covering required rank, allowed server types, inputs, and execution behaviour for player management, round control, and testing."
+---
+
+The mod panel is an in-game interface accessible to players whose account rank meets or exceeds `Moderator`, or to anyone in a private server or the place owner's session. Commands are loaded dynamically from the `Commands` folder at runtime — each `ModuleScript` exports a definition table and an `Execute` function. `ModPanelService` validates rank, server context, and payload before dispatching execution and logging the result to `WebhookService`.
+
+## Rank & Server Context
+
+Every command carries two access constraints:
+
+- **`RequiredRank`** — a string key resolved via `RankTranslations` (e.g. `"Moderator"`). In public servers the caller must meet or exceed this rank. In private servers the rank check is relaxed: any player in a private server can execute commands that list `"PrivateServers"` in `AllowedIn`, regardless of rank.
+- **`AllowedIn`** — an array of strings: `"PublicServers"`, `"PrivateServers"`, or both. Commands not permitted for the current server type are rejected before `Execute` is called.
+
+All commands in this game set `AllowedIn = {"PrivateServers", "PublicServers"}` and `RequiredRank = "Moderator"`.
+
+## Command Format
+
+Each command module exports a table with this shape:
+
+```lua
+{
+    Id               = "command_id",        -- unique string identifier
+    DisplayName      = "Human Name",        -- shown in the panel UI
+    Order            = 1,                   -- sort order (lower = higher)
+    Executable       = true,                -- false = display-only toggle
+    ResetOnExecution = false,               -- resets input fields after run
+    AllowedIn        = {"PrivateServers", "PublicServers"},
+    RequiredRank     = "Moderator",
+    Inputs           = {                    -- array of input descriptors
+        { Id = "field_id", Type = "string", DisplayName = "Label", ... }
+    },
+}
+```
+
+`GetDisplayName()` can be implemented on any module to return a dynamic label (e.g. showing the current toggle state).
+
+---
+
+## Player Management
+
+<Accordion title="BanPlayer — ID: ban_player">
+Permanently bans a player from the universe using `Players:BanAsync`. Falls back to a local server ban if the API call fails.
+
+| Field | Value |
+|---|---|
+| `Order` | 17 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | true |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `target_player` | `string` (DynamicOptions: Players) | Online player to ban |
+| `username` | `findplayer` | Username lookup for offline bans |
+| `ban_reason` | `string` (Options: Exploiting, Harassment, Toxicity, Cross Teaming, Other) | Reason shown to the player |
+| `evidence` | `textboxpara` | Evidence links appended to the private reason |
+
+In private servers where the caller is below `Moderator` rank, only a local session ban is applied.
+</Accordion>
+
+<Accordion title="UnbanPlayer — ID: unban_player">
+Calls `Players:UnbanAsync` and removes any in-memory local ban for the user.
+
+| Field | Value |
+|---|---|
+| `Order` | 24 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | true |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `username` | `findplayer` | Username of the banned player |
+| `scope` | `string` (Options: Universe, Current Place) | Scope of the unban |
+</Accordion>
+
+<Accordion title="KickPlayer — ID: kick_player">
+Kicks a player from the current server with an optional reason.
+
+| Field | Value |
+|---|---|
+| `Order` | 1 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | false |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `target_player` | `string` (DynamicOptions: Players) | Player to kick |
+| `reason` | `textbox` | Kick reason message |
+</Accordion>
+
+<Accordion title="KillPlayer — ID: kill_player">
+Immediately kills the target player's character by calling `character:BreakJoints()`.
+
+| Field | Value |
+|---|---|
+| `Order` | 2 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | false |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `target_player` | `string` (DynamicOptions: Players) | Player to kill |
+</Accordion>
+
+<Accordion title="RagdollPlayer — ID: ragdoll_player">
+Toggles the ragdoll state on the target player's character using the shared `Ragdoll` module.
+
+| Field | Value |
+|---|---|
+| `Order` | 6 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | false |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `target_player` | `string` (DynamicOptions: Players) | Affected player |
+| `ragdoll_state` | `string` (Options: On / Off) | Whether to start or stop ragdoll |
+</Accordion>
+
+<Accordion title="SetPlayerRole — ID: set_player_role">
+Converts a player to a Killer or Survivor mid-round, creating a fresh actor and placing the character at the appropriate spawn position if a round is active.
+
+| Field | Value |
+|---|---|
+| `Order` | 4 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | false |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `target_player` | `string` (DynamicOptions: Players) | Player to convert |
+| `role` | `string` (Options: Survivor / Killer) | Target role |
+| `actor_name` | `string` (DependsOn: role) | Character to spawn — options filtered per role |
+</Accordion>
+
+<Accordion title="SetPlayerMalice — ID: set_player_malice">
+Sets the player's `Bloodlust` / malice value directly in their profile and updates the leaderboard live.
+
+| Field | Value |
+|---|---|
+| `Order` | 23 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | true |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `target_player` | `string` (DynamicOptions: Players) | Target player |
+| `amount` | `textboxpara` | New malice value (integer ≥ 0) |
+</Accordion>
+
+---
+
+## Round Control
+
+<Accordion title="ForceEndRound — ID: force_end_round">
+Ends the current active round. Fails if there is no round in progress or if the timer is currently disabled (which also prevents early ending).
+
+| Field | Value |
+|---|---|
+| `Order` | 9 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | false |
+
+No inputs required.
+</Accordion>
+
+<Accordion title="ForceIntermissionEnd — ID: force_intermission_end">
+Skips the current intermission and starts the next round immediately.
+
+| Field | Value |
+|---|---|
+| `Order` | 10 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | false |
+
+No inputs required.
+</Accordion>
+
+<Accordion title="ForceNextKiller — ID: force_next_killer">
+Sets a `ForcedNextKillerUserId` workspace attribute so the specified player is guaranteed to be selected as killer next round. Choosing "Random" clears the override.
+
+| Field | Value |
+|---|---|
+| `Order` | 8 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | false |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `target_player` | `string` (DynamicOptions: Players, Option: Random = "off") | Player to force as killer, or Random to clear |
+</Accordion>
+
+<Accordion title="ForceNextMap — ID: force_next_map">
+Sets the next map by name. Uses `RoundUtil:ForceNextMap` for fuzzy matching.
+
+| Field | Value |
+|---|---|
+| `Order` | 7 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | false |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `map_name` | `textbox` | Partial or full map name |
+</Accordion>
+
+<Accordion title="ForceNextGamemode — ID: force_next_gamemode">
+Overrides the next gamemode. Choosing "Random" clears the `ForcedGamemode` workspace attribute.
+
+| Field | Value |
+|---|---|
+| `Order` | 9 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | false |
+
+**Inputs:**
+
+| Id | Type | Options |
+|---|---|---|
+| `gamemode_name` | `string` | Random, Classic, Double Trouble, One Bounce, Powerhouse |
+</Accordion>
+
+<Accordion title="DisableTimer — ID: disable_timer">
+Toggles the `NoTimer` workspace attribute on/off. When `NoTimer` is `true`, `ForceEndRound` cannot end the round early. The display label updates to show the current state.
+
+| Field | Value |
+|---|---|
+| `Order` | 11 |
+| `RequiredRank` | Moderator |
+| `DisplayedAttribute` | `NoTimer` |
+
+No inputs — execution toggles the current state.
+</Accordion>
+
+<Accordion title="MaxKillerCap — ID: max_killer_cap">
+Sets the `MaxKillers` workspace attribute. Controls how many killers can be assigned per round.
+
+| Field | Value |
+|---|---|
+| `Order` | 16 |
+| `RequiredRank` | Moderator |
+| `DisplayedAttribute` | `MaxKillers` |
+
+**Inputs:**
+
+| Id | Type | Range |
+|---|---|---|
+| `killer_cap` | `number` | 1 – 10, default 10 |
+</Accordion>
+
+<Accordion title="EnableFriendlyFire — ID: enable_friendly_fire">
+Toggles the `FriendlyFire` workspace attribute. When enabled, killers can damage each other and survivors can be damaged by other survivors.
+
+| Field | Value |
+|---|---|
+| `Order` | 12 |
+| `RequiredRank` | Moderator |
+
+**Inputs:**
+
+| Id | Type | Options |
+|---|---|---|
+| `enabled` | `string` | True (`on`) / False (`off`) |
+</Accordion>
+
+---
+
+## Character & Inventory
+
+<Accordion title="SetEquippedCharacter — ID: set_equipped_character">
+Grants the player access to a character (via `CharacterAccessOverrides`) and sets it as their equipped character for future rounds. The change is saved to the profile immediately.
+
+| Field | Value |
+|---|---|
+| `Order` | 5 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | false |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `target_player` | `string` (DynamicOptions: Players) | Target player |
+| `role` | `string` (Options: Survivor / Killer) | Which roster to update |
+| `actor_name` | `string` (DependsOn: role) | Character name, options filtered per role |
+</Accordion>
+
+<Accordion title="SetEquippedSkin — ID: set_equipped_skin">
+Applies a skin to the player's currently active or equipped character. Searches the active actor first, then the equipped character, then performs a global scan for the skin name.
+
+| Field | Value |
+|---|---|
+| `Order` | 5 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | false |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `target_player` | `string` (DynamicOptions: Players) | Target player |
+| `skin_name` | `string` | Skin name (e.g. `Default`, `El33t`) |
+</Accordion>
+
+<Accordion title="SpawnCharacter — ID: spawn_character">
+Spawns one or more NPC instances of any character near the calling moderator's position. Optionally sets an ability move loop to auto-fire continuously.
+
+| Field | Value |
+|---|---|
+| `Order` | 1 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | true |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `actor_name` | `textbox` | Character name or `"all"` to spawn every character |
+| `actor_type` | `string` (Options: Survivor / Killer) | Character role |
+| `skin_name` | `textbox` | Skin name, defaults to `Default` |
+| `quantity` | `number` | 1 – 20 instances |
+| `move` | `textbox` | Optional ability name to auto-loop |
+</Accordion>
+
+<Accordion title="GivePlayerMoney — ID: give_player_money">
+Adds Fragments (currency) to the player's profile and updates the leaderboard value live.
+
+| Field | Value |
+|---|---|
+| `Order` | 19 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | true |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `target_player` | `string` (DynamicOptions: Players) | Recipient |
+| `amount` | `textboxpara` | Integer amount to add (must be > 0) |
+</Accordion>
+
+<Accordion title="GiveStatus — ID: give_status">
+Applies a status effect to a player's character. The status list is built dynamically from the `StatusEffects` folder at boot.
+
+| Field | Value |
+|---|---|
+| `Order` | 5 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | false |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `target_player` | `string` (DynamicOptions: Players, AllPlayersDisable: false) | Target player |
+| `status_name` | `string` (dynamic options) | Status effect name |
+| `duration` | `number` | Duration in seconds (1 – 120, default 15) |
+| `level` | `number` | Effect level (1 – 10, default 1) |
+</Accordion>
+
+---
+
+## Testing Toggles
+
+<Accordion title="DisableAbilityCooldowns — ID: disable_ability_cooldowns">
+Sets the `InfiniteCooldowns` attribute on all players and their characters. When enabled, also immediately resets all active ability cooldowns via `Paragon.Abilities:ResetAllCooldowns`. The display label shows the current state.
+
+| Field | Value |
+|---|---|
+| `Order` | 13 |
+| `RequiredRank` | Moderator |
+
+**Inputs:**
+
+| Id | Type | Options |
+|---|---|---|
+| `enabled` | `string` | True (`on`) / False (`off`) |
+</Accordion>
+
+<Accordion title="DisableAbilityChargeRequirement — ID: disable_ability_charge_requirement">
+Toggles the `ChargesDisabled` workspace attribute. When `true`, abilities can be used without meeting their charge threshold.
+
+| Field | Value |
+|---|---|
+| `Order` | 14 |
+| `RequiredRank` | Moderator |
+
+**Inputs:**
+
+| Id | Type | Options |
+|---|---|---|
+| `enabled` | `string` | True (`on`) / False (`off`) |
+</Accordion>
+
+---
+
+## Communication
+
+<Accordion title="SendAnnouncement — ID: send_announcement">
+Broadcasts a text-filtered notification to all players in the current server only. The message is prefixed with `[ANNOUNCE] DisplayName:` and displayed for 5 seconds.
+
+| Field | Value |
+|---|---|
+| `Order` | 3 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | true |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `message` | `textbox` | Announcement text (text-filtered before sending) |
+</Accordion>
+
+<Accordion title="SendGlobalAnnouncement — ID: send_global_announcement">
+Publishes a message to the `ShatteredReality_GlobalAnnounce` `MessagingService` topic, which is received by every live server instance. Also sends the message locally for 6 seconds with a `[GLOBAL]` prefix.
+
+| Field | Value |
+|---|---|
+| `Order` | 3.1 |
+| `RequiredRank` | Moderator |
+| `ResetOnExecution` | true |
+
+**Inputs:**
+
+| Id | Type | Description |
+|---|---|---|
+| `message` | `textboxpara` | Announcement text (text-filtered before sending) |
+</Accordion>
+
+<Warning>
+`SendGlobalAnnouncement` uses `MessagingService:PublishAsync` to broadcast across **all live server instances** simultaneously. Misuse will surface the message to every player in every server. This action is always logged to `WebhookService` regardless of outcome.
+</Warning>
+
+---
+
+## DefaultToggle Pattern
+
+Commands that simply read and write a single workspace attribute follow the `DefaultToggle` pattern. The `Executable` field is set to `false` for the base template (`default_toggle` ID), meaning the button is display-only. Real toggle commands (e.g. `DisableTimer`, `EnableFriendlyFire`) override `Execute` to flip their attribute and update `GetDisplayName` to reflect the live value:
+
+```lua
+function module:GetDisplayName()
+    return "Disable Timer Currently: "
+        .. (workspace:GetAttribute("NoTimer") == true and "True" or "False")
+end
+
+function module:Execute()
+    local noTimer = not (workspace:GetAttribute("NoTimer") == true)
+    workspace:SetAttribute("NoTimer", noTimer)
+    return true, noTimer and "Timer disabled." or "Timer enabled.", "success"
+end
+```
+
+The `DisplayedAttribute` field (used by `DisableTimer` and `MaxKillerCap`) tells the client panel which workspace attribute to watch for live value display without re-fetching the command list.
+
+<Note>
+All command executions — successful or failed — are logged to `WebhookService:LogCommand()` with `source = "ModPanel"`, the executor's player object, the command ID, the raw payload, and the result message. Rate limiting on `RunModPanelCommand` allows a maximum of 10 calls per 5-second window per player.
+</Note>

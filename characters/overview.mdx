@@ -1,0 +1,119 @@
+---
+title: "Characters: Killers and Survivors in Shattered Reality"
+sidebarTitle: "Overview"
+description: "An overview of Shattered Reality's character roster, the Killer/Survivor role split, and how every character config module is structured in Luau."
+---
+
+Shattered Reality's cast is divided into two asymmetric roles: one **Killer** hunts a lobby of **Survivors**, each side bringing a unique kit of abilities, stamina values, and animations to every round. All character data is stored in `ReplicatedStorage/Characters/` and loaded at runtime by the shared `Characters` module, which normalises configs, applies skin overrides, and exposes a unified API for both server and client code.
+
+## The Two Roles
+
+<CardGroup cols={2}>
+  <Card title="Killers" icon="skull" href="/characters/killers">
+    Killers are the asymmetric threat. There is exactly one Killer per round, and their goal is to eliminate every Survivor before they can escape. They have significantly higher health pools and access to offensive abilities designed for pursuit and crowd control.
+  </Card>
+  <Card title="Survivors" icon="person-running" href="/characters/survivors">
+    Survivors spawn together and must escape or outlast the Killer. Each Survivor has lower health than a Killer but faster baseline walk speeds and abilities that aid in evasion, healing, or disruption.
+  </Card>
+</CardGroup>
+
+## Default Unlocked Actors
+
+Every new player profile is automatically granted a set of free characters, defined in `DataService`:
+
+```lua
+local DEFAULT_ACTORS = {
+    Killers = {"JohnDoe"},
+    Survivors = {"Brickbattler", "Vintage"},
+}
+```
+
+`JohnDoe` is the default equipped Killer and `Brickbattler` is the default equipped Survivor. Any actor whose folder name starts with `!` (such as `!Pursuer` or `!Vintage`) is treated as a special-access character — the leading `!` is stripped during fuzzy-name resolution and the character will not appear in the standard roster unless a `CharacterAccessOverride` is set on the player's data.
+
+## Character Folder Structure
+
+Every character lives under its role folder (`Killers/` or `Survivors/`) and follows a consistent layout:
+
+```
+Characters/
+└── Killers/
+    └── JohnDoe/
+        ├── Config/          ← ModuleScript or folder containing init.luau
+        │   └── init.luau    ← The canonical config returned to both server and client
+        ├── Manager/         ← Server + client behaviour scripts
+        └── Abilities/       ← Individual ability ModuleScripts
+            ├── Client/
+            └── Server/
+```
+
+Some characters place a flat `Config.luau` directly in the character folder instead of a `Config/` sub-folder — both layouts are supported by `Characters.GetDefaultConfigModule`. A `Modules/` sub-folder is optionally present for characters that define local helpers shared between their ability scripts.
+
+## Config Module Fields
+
+Every character config returns a plain Lua table. The fields shared across all characters are:
+
+| Field | Type | Description |
+|---|---|---|
+| `Info.DisplayName` | `string` | Human-readable name shown in the UI |
+| `Info.Description` | `string` | Short subtitle / flavour text |
+| `Class` | `string` | Archetype label (e.g. `"Rushdown"`, `"Sentinel"`) |
+| `Price` | `number` | Fragment cost to unlock (0 = free / default) |
+| `MaxHealth` | `number` | Starting hit points for this character |
+| `SprintConfig` | `table` | Stamina and movement tuning (see below) |
+| `AbilityInfo` | `table` | Keyed ability configs, one entry per ability |
+| `Animations` | `table` | Asset IDs for every animation state |
+| `AnimationLooping` | `table` | Mirrors `Animations` — `true` where the track should loop |
+
+### SprintConfig Layout
+
+```lua
+SprintConfig = {
+    Stamina    = 115,   -- starting stamina
+    MaxStamina = 115,   -- stamina ceiling
+    WalkSpeed  = 9.5,   -- studs/s when not sprinting
+    SprintSpeed = 30,   -- studs/s while sprinting
+    SprintLoss = 12.5,  -- stamina drained per second of sprint
+    SprintGain = 28,    -- stamina recovered per second when not sprinting
+},
+```
+
+The `Characters` module aliases `SprintConfig` ↔ `Sprint` so either key works. During **LMS** (Last Man Standing) rounds, stamina and sprint values are capped via `Characters.Global.StaminaTuning.LMSCaps`:
+
+```lua
+Characters.Global = {
+    StaminaTuning = {
+        LMSCaps = {
+            Survivor = { Sprint = 120, Stamina = 120 },
+            Killer   = { Sprint = 132, Stamina = 132 },
+        },
+    },
+}
+```
+
+## Killer ↔ Survivor Connections
+
+Killer configs may include a `Connection` field that pairs the killer with one or more survivors for special gameplay interactions, most notably custom **LMS music**:
+
+```lua
+-- From JohnDoe/Config/init.luau
+Connection = { "JaneDoe" },
+LMSConnection = {
+    JaneDoe = {
+        ThemeID = asset(114037366568111),
+    },
+},
+```
+
+When John Doe is the active Killer and Jane Doe is among the living Survivors, the round's LMS phase plays the bespoke theme defined in `LMSConnection` rather than the default track.
+
+## Config Loading Pipeline
+
+1. `Characters.GetDefaultConfigModule` locates the `Config` module for a given actor.
+2. `load_default_actor_config` requires the module and deep-clones the result.
+3. `normalize_actor_config` fills in aliases (`SprintConfig`/`Sprint`, `AbilityInfo`/`Abilities`, `Name`/`DisplayName`).
+4. If a skin name is provided, `GetActorConfig` merges the skin's `Config.luau` on top via `merge_into`.
+5. The final table is returned to callers — server services, ability scripts, and client UI alike.
+
+<Note>
+  Ability configs go through an additional normalisation pass (`normalize_ability_config`) that resolves field aliases such as `ChargeRegenTime` → `ChargeRegen` and auto-populates `ChargeRegen` from `Cooldown` when `MaxCharges` is set but `ChargeRegen` is absent.
+</Note>

@@ -1,0 +1,195 @@
+---
+title: "Character Replication: Syncing Positions Across Clients"
+sidebarTitle: "Character Replication"
+description: "How Shattered Reality keeps every character's ServerHitbox in sync across all clients using client-authoritative position packets, velocity prediction, and lag compensation snapshots."
+---
+
+Character Replication is the subsystem responsible for keeping every player's `ServerHitbox` part in sync across all connected clients. Rather than relying on Roblox's built-in network ownership and physics replication — which introduces variable lag and can be manipulated — Shattered Reality uses a bespoke pipeline where each client sends its own position as a compact binary packet, the server verifies and forwards it, and every other client reconstructs a smoothed, wall-clipped estimate of where that character is right now.
+
+## Architecture Overview
+
+The pipeline involves three distinct modules working in concert:
+
+<CardGroup cols={3}>
+  <Card title="Shared/Gameplay/CharacterReplication" icon="arrows-rotate">
+    The client-side transmitter. Runs on the local player's machine and fires `CommunicatePos` packets to the server at 20 Hz.
+  </Card>
+  <Card title="ServerScriptService/Services/CharacterReplication" icon="server">
+    The server-side receiver. Deserialises each packet, runs sanity checks, performs velocity prediction, updates `ServerHitbox.CFrame`, and stores `HitboxState` entries for the main extrapolation loop.
+  </Card>
+  <Card title="Main/Features/Networking/CharacterReplication" icon="eye">
+    The client-side visualiser. Interpolates every other player's `HumanoidRootPart` toward their `ServerHitbox` position every `Heartbeat`.
+  </Card>
+</CardGroup>
+
+## The CommunicatePos Channel
+
+Both the transmitter and server receiver share the same DeltaNetwork event:
+
+```lua
+local CommunicatePos = Delta.Event("CommunicatePos", Delta.Buffer)
+```
+
+The transmitter fires it at `UpdateRate = 1/20` (50 ms) intervals:
+
+```lua
+RunService.Heartbeat:Connect(function(DeltaTime: number)
+    Accumulated += DeltaTime
+    if Accumulated < Config.UpdateRate then
+        return
+    end
+    Accumulated -= Config.UpdateRate
+
+    local Character = LocalPlayer.Character
+    local RootPart = Character and Character:FindFirstChild("HumanoidRootPart")
+
+    if Character:HasTag("Replicating") then
+        CommunicatePos:Fire(
+            PosSerdes.Serialize(
+                RootPart.CFrame,
+                RootPart.AssemblyLinearVelocity,
+                workspace:GetServerTimeNow()
+            )
+        )
+    end
+end)
+```
+
+Only characters tagged `"Replicating"` via `CollectionService` transmit. The 34-byte `PosSerdes` buffer encodes XYZ position (3×f32), quantized yaw (i16), XYZ velocity (3×f32), and a server-authoritative timestamp (f64).
+
+## Server-Side Reception and Validation
+
+The server service listens on `CommunicatePos` and performs layered validation before touching any state:
+
+<Steps>
+  <Step title="Buffer integrity check">
+    Rejects packets that are not a `buffer`, have zero length, or exceed 1 024 bytes.
+  </Step>
+  <Step title="NaN and bounds check">
+    Deserialises with `pcall(PosSerdes.Deserialize, data)`, then checks every component of the `CFrame` and `Velocity` for NaN and absolute values above 100 000 studs / 120 studs·s⁻¹ respectively.
+  </Step>
+  <Step title="Timestamp sanity check">
+    Rejects timestamps outside ±10¹² seconds to prevent time-based exploits.
+  </Step>
+  <Step title="Velocity clamping">
+    Velocity vectors that exceed `MaxVelocityStuds = 120` are clamped to their unit direction scaled to 120 rather than rejected outright — preserving direction while preventing speed abuse.
+  </Step>
+</Steps>
+
+After validation, the server optionally applies velocity prediction before writing the result into `ServerHitbox.CFrame` and storing a `HitboxState` record:
+
+```lua
+type HitboxState = {
+    ServerHitbox: BasePart,
+    BasePosition: Vector3,
+    BaseRotation: CFrame,
+    Velocity: Vector3,
+    ReceivedAt: number,
+}
+```
+
+## Velocity Prediction
+
+The server `PredictVelocity` function compensates for the packet's travel time so that the `ServerHitbox` is positioned where the player *is right now*, not where they were when they sent the packet.
+
+Key configuration values from the source:
+
+```lua
+Config = {
+    PingCap           = 0.10,    -- maximum ping factored into prediction (seconds)
+    PingSmoothing     = 0.2,     -- EMA weight for ping smoothing
+    PredictionExponent= 0.95,    -- non-linear velocity curve
+    VelocitySmoothingBase = 0.26324,
+    VelocitySmoothingRate = 14.1294,
+    VelocitySmoothingMin  = 0.15,
+    VelocitySmoothingMax  = 0.95,
+    AngularVelocityDivisor = 150,
+    MaxExtrapolation  = 0.25,    -- max seconds to extrapolate between packets
+    MaxVelocityStuds  = 120,
+}
+```
+
+The function blends the current velocity with the previous frame's velocity to reduce jitter, applies an exponentiated curve (`0.95`) to suppress micro-oscillations, then raycasts horizontally and vertically to prevent the predicted hitbox from clipping through walls or floors.
+
+<Note>
+  Prediction is skipped entirely when a character is anchored, ragdolling, dead, or lacks the `"Replicating"` CollectionService tag. In those cases the server writes the raw packet `TargetCFrame` directly.
+</Note>
+
+## Per-Heartbeat Extrapolation Loop
+
+Between packets the server continuously extrapolates each stored `HitboxState` forward in time to keep the hitbox moving smoothly:
+
+```lua
+local ElapsedSincePacket = math.clamp(Now - State.ReceivedAt, 0, Config.MaxExtrapolation)
+local ExtrapolatedPosition = State.BasePosition + State.Velocity * ElapsedSincePacket
+local TargetCFrame = CFrame.new(ExtrapolatedPosition) * State.BaseRotation
+
+local Alpha = 1 - math.exp(-18 * DeltaTime)
+State.ServerHitbox.CFrame = State.ServerHitbox.CFrame:Lerp(TargetCFrame, Alpha)
+```
+
+The `MaxExtrapolation = 0.25` cap prevents the hitbox from drifting more than 30 studs ahead (at max speed) if a packet is dropped.
+
+## Client-Side Visualiser
+
+The module at `Main/Features/Networking/CharacterReplication` runs the inverse operation: it interpolates the visual `HumanoidRootPart` toward the authoritative `ServerHitbox` position so that remote characters appear to move smoothly.
+
+```lua
+local Config = {
+    UpdateRate  = 1 / 20,   -- transmit rate
+    SnapDistance = 30       -- studs; above this, snap instead of lerp
+}
+```
+
+On every `Heartbeat`:
+
+```lua
+-- Exponential interpolation toward ServerHitbox
+local ClientInterpolation = 9
+local InterpolationSpeed = 10 ^ (-ClientInterpolation)
+local Alpha = math.clamp(1 - InterpolationSpeed ^ DeltaTime, 0, 1)
+
+-- Snap if too far away or if the part is anchored
+local SnapToTarget = Distance > Config.SnapDistance or RootPart.Anchored
+RootPart.CFrame = CFrame.new(
+    RootPart.Position:Lerp(TargetCFrame.Position, SnapToTarget and 1 or Alpha)
+) * RootPart.CFrame.Rotation:Lerp(TargetCFrame.Rotation, SnapToTarget and 1 or RotationAlpha)
+```
+
+Characters that are ragdolling skip position interpolation and snap directly — their `ServerHitbox` is simply placed at the ragdoll `ServerHitbox.Position` each frame.
+
+## ClientSnapshots and Lag Compensation
+
+The hitbox system maintains a circular snapshot buffer of each client's `ServerHitbox` positions for lag compensation during hitbox casting. The buffer is created via the `create(config)` factory in `Shared/Gameplay/Hitboxes/ClientSnapshots`:
+
+```lua
+local ClientSnapshots = CharacterReplication.create({
+    SNAPSHOT_CAPACITY    = 40,
+    SetClientCFramePacket = SetClientCFramePacket,
+    MAX_CLIENT_DRIFT     = 80,    -- MAX_CLIENT_SNAPSHOT_DRIFT in studs
+})
+```
+
+`SNAPSHOT_CAPACITY = 40` means each client's buffer stores the 40 most-recent position samples. When a new snapshot would push the CFrame more than `MAX_CLIENT_DRIFT = 80` studs from the part's current position, it is **discarded** — preventing teleport exploits from poisoning the lag-comp buffer.
+
+```lua
+if (cframe.Position - part.Position).Magnitude > maxClientDrift then
+    return  -- discard stale or teleport snapshot
+end
+```
+
+The `Sample(player, part, targetTime)` function walks the buffer backward and lerps between the two samples that bracket `targetTime`, returning an interpolated `{time, cframe, velocity}` record for the hitbox cast to use.
+
+When the hitbox system queries the lag-compensated position of a character, it rewinds by:
+
+```lua
+-- BEAN_CLIENT_REWIND_FACTOR = 0.5
+local rewindTime = workspace:GetServerTimeNow() - ping * BEAN_CLIENT_REWIND_FACTOR
+local snapshot = ClientSnapshots.Sample(player, rootPart, rewindTime)
+```
+
+`BEAN_CLIENT_REWIND_FACTOR = 0.5` means only half of the measured ping is rewound, striking a balance between fairness to the attacker and fairness to the victim.
+
+<Tip>
+  To visually compare hitbox positions against actual `ServerHitbox` positions during playtesting, set `ShowOwnClientServerHitboxes = true` on the local character. The `VisualizerHitbox` DeltaNetwork event will render coloured boxes in-world showing both the cast origin and the lag-compensated snapshot position.
+</Tip>

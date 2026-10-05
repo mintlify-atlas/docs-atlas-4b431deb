@@ -1,0 +1,136 @@
+---
+title: "Round Lifecycle: From Intermission to Round End"
+sidebarTitle: "Round Lifecycle"
+description: "A deep dive into Shattered Reality's round state machine—covering Intermission, map loading, actor setup, the active round loop, and how rounds resolve."
+---
+
+Every match in Shattered Reality follows a strict state machine managed by `RoundService`. From the moment the server boots to the final death-screen fade, each stage transitions in sequence, communicating to all clients via `workspace` attributes and the DeltaNetwork `ManageVisuals` event. Understanding this pipeline is essential for anyone extending game systems, writing gamemodes, or debugging unexpected round resets.
+
+## State and Stage Labels
+
+`RoundService` tracks two parallel attributes on `workspace` at all times.
+
+| Attribute | Values |
+|---|---|
+| `RoundPhase` | `Reset`, `Intermission`, `Round` |
+| `RoundStage` | `Reset`, `Intermission`, `Preparing`, `LoadingMap`, `ActorsReady`, `ActiveRound`, `RoundEnding` |
+
+The **phase** is a coarse state used by code-paths that only need to know whether a round is in progress. The **stage** is fine-grained and is read by the HUD and other subsystems.
+
+## Timing Constants
+
+```lua
+local Timing = {
+    IntermissionTime        = 45,   -- seconds of lobby countdown
+    IntermissionTickInterval = 1,   -- tick frequency (seconds)
+    PlayerRespawnTime       = 3,    -- Players.RespawnTime during intermission
+}
+```
+
+During an active round, `Players.RespawnTime` is set to `999999` to prevent Roblox from respawning players who are downed mid-match.
+
+## HUD State Labels
+
+The client HUD reads the `RoundHudPhase` workspace attribute, whose possible values are defined as:
+
+| Label | Meaning |
+|---|---|
+| `NoPlayers` | Not enough eligible players to start |
+| `AllPlayersAfk` | All present players have AFK mode on |
+| `Intermission` | Standard countdown in progress |
+| `Survive` | Active round — survivors must outlast the timer |
+| `LastManStanding` | Only one killer and one survivor remain |
+| `Ingame timer disabled` | `NoTimer` flag is set; timer is suppressed |
+
+## Winner Outcomes
+
+When a round ends, `RoundUtil:BuildRoundResult` resolves one of two outcomes:
+
+- **`Killer` wins** — all survivors are eliminated before the timer expires.
+- **`Survivor` wins** — at least one survivor outlasts the round timer.
+
+Reward payouts differ accordingly. Killers who win earn 40 Cash and 15 Character Points; survivors who win earn 20 Cash and 10 Character Points.
+
+## The Full Lifecycle
+
+<Steps>
+  <Step title="Reset">
+    `RoundService:Reset()` clears any existing session, disconnects participant connections, destroys the loaded map, and sets `RoundPhase = "Reset"` / `RoundStage = "Reset"`. This is also the initial state on server start.
+  </Step>
+
+  <Step title="Intermission">
+    `RoundService:StartIntermission()` transitions `RoundPhase` to `"Intermission"` and `RoundStage` to `"Intermission"`. A per-second heartbeat loop ticks down `IntermissionTime` (45 s) and fires HUD updates. If fewer than two eligible non-AFK players exist, the HUD phase shows `NoPlayers` or `AllPlayersAfk` and the countdown pauses until the roster is satisfied.
+  </Step>
+
+  <Step title="Preparing">
+    When the countdown hits zero (or an admin calls `EndIntermission`), `BeginRoundFlow` is invoked. A gamemode is selected via `RoundUtil:SelectGamemode`, a session object is constructed, and actors are pre-warmed with `RoundUtil:WarmRoundActors`. `RoundStage` becomes `"Preparing"`.
+
+    ```lua
+    -- Session fields created at this point
+    {
+        CurrentGamemode = gamemode,
+        RoundRoster     = roster,
+        AllowSoloRound  = allowSoloRound,
+        Time            = 0,            -- filled in StartRound
+        TimePast        = 0,
+        Participants    = {},
+    }
+    ```
+  </Step>
+
+  <Step title="LoadingMap">
+    After a short `BeforeMapTeleport` delay (0.25 s), `RoundStage` advances to `"LoadingMap"`. The roster is validated for connected players, then `RoundUtil:TeleportToMap` selects and loads a map, positioning all participants at spawn points. Spawn part collision is enabled during this phase.
+  </Step>
+
+  <Step title="ActorsReady">
+    Once the map is loaded, `RoundUtil:InitGamemode` calls `Mode:StartRound(context, session)` on the selected gamemode, which selects the killer(s), creates survivor actors, and returns a runtime object. `RoundStage` becomes `"ActorsReady"` and round metadata is broadcast via `RoundUtil:SetRoundMetadata`.
+  </Step>
+
+  <Step title="ActiveRound">
+    `RoundService:StartRound()` sets `RoundPhase = "Round"` and `RoundStage = "ActiveRound"`. Spawn-part collision is disabled so characters don't clip into them, and a `RunService.Heartbeat` loop begins ticking `session.TimePast`. Each tick checks alive counts; if either killers or survivors reach zero the round ends early. A Last Man Standing sequence (`GetLMS`) triggers when exactly one of each side remains.
+  </Step>
+
+  <Step title="RoundEnding">
+    `RoundService:EndRound()` is called when time expires or a side's alive count hits zero. `RoundStage` is set to `"RoundEnding"`, the `RoundEnded` signal fires, rewards are distributed, and LMS state is cleared. The `ManageVisuals` DeltaNetwork event fires to apply a black-cover transition before the next intermission begins.
+
+    ```lua
+    -- Fired at the end of every round
+    ManageVisuals:Fire("Apply", "BlackCover", {
+        Time       = 0.5,
+        RemoveTime = 0.65,
+        Duration   = 0.75,
+    })
+    ```
+  </Step>
+</Steps>
+
+## ManageVisuals Event
+
+`ManageVisuals` is a DeltaNetwork event defined as:
+
+```lua
+local ManageVisuals = Delta("ManageVisuals", Delta.String, Delta.String, Delta.Table)
+```
+
+It carries an **action** string (`"Apply"`), a **visual ID** (`"BlackCover"`), and a **config table** containing timing fields. Clients listen for this event to animate screen transitions between rounds. This decouples round logic from client rendering entirely — the server only fires the event, and clients handle how the fade looks.
+
+## Gamemode Integration
+
+Each gamemode plugs in through a consistent interface. The active gamemode is called during `ActorsReady` via:
+
+```lua
+function RoundUtil:InitGamemode(session)
+    return getGamemodeDefinition(session.CurrentGamemode).StartRound(session)
+end
+```
+
+Every gamemode exposes at minimum:
+
+- `Mode:StartRound(context, session)` — selects actors and returns a runtime table.
+- `Mode:FinishRound(session, runtime)` — optional cleanup hook.
+- `Mode:GetRoundTime(session)` — returns the round duration in seconds.
+- `Mode:ApplyActorModifiers(actor, player, spawnData)` — called after each actor spawns to apply stat overrides.
+
+<Note>
+Gamemodes with `Mode.Weight = 0` are excluded from automatic rotation and can only be started by a direct admin command or a forced gamemode override. See the [Gamemodes](/systems/gamemodes) page for details on each mode.
+</Note>

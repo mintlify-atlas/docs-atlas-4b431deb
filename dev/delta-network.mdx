@@ -1,0 +1,265 @@
+---
+title: "DeltaNetwork: Typed Roblox Remote Communication"
+sidebarTitle: "DeltaNetwork"
+description: "DeltaNetwork is a singleton wrapper around Roblox RemoteEvents and RemoteFunctions with typed argument validation, middleware, rate-limiting, and compressed serialisation types."
+---
+
+DeltaNetwork is Shattered Reality's in-house networking layer, built on top of Roblox's `RemoteEvent`, `UnreliableRemoteEvent`, and `RemoteFunction` primitives. It enforces type validation on every incoming message, supports per-event middleware chains, per-player rate limiting, and retry logic — all behind a clean, consistent API that works identically on server and client.
+
+## Singleton Pattern
+
+DeltaNetwork is a module-level singleton. When the module is first `require`d, it registers itself into `_G`:
+
+```lua
+if rawget(_G, "__DELTA_SINGLETON") then
+    return (_G :: any).__DELTA_SINGLETON
+end
+-- ... initialization ...
+(_G :: any).__DELTA_SINGLETON = Delta
+```
+
+Every subsequent `require` of the module returns the same instance. This guarantees that event registrations from different scripts all resolve to the same underlying `RemoteEvent` objects without duplicating them.
+
+## Bootstrap and Folder Structure
+
+`Bootstrap.create()` provisions three child folders inside `ReplicatedStorage.DeltaNetwork` on the server and waits for them on the client:
+
+| Folder | Contents |
+|---|---|
+| `Events` | Standard `RemoteEvent` instances |
+| `UnreliableEvents` | `UnreliableRemoteEvent` instances |
+| `Functions` | `RemoteFunction` instances |
+
+The server always creates the folders; clients wait up to 10 seconds for them to replicate before falling back to creating their own local stubs.
+
+## Creating Events and Functions
+
+### `Delta.Event`
+
+Creates (or retrieves) a typed event backed by a `RemoteEvent`.
+
+```lua
+local Delta = require(ReplicatedStorage.Modules.Shared.Network.DeltaNetwork)
+
+-- Declare an event that carries a CFrame and a number
+local MyEvent = Delta.Event("MyAbilityFired", Delta.CFrameF24U8, Delta.NumberF16)
+```
+
+### `Delta.UnreliableEvent`
+
+Same as `Delta.Event` but backed by an `UnreliableRemoteEvent`. The instance key is prefixed with `"Unreliable/"` so it never collides with a reliable event of the same name.
+
+```lua
+local PositionUpdate = Delta.UnreliableEvent("PositionUpdate", Delta.Vector3F24)
+```
+
+<Note>
+  Unreliable events cannot define response types — calling `:Response()` on an unreliable event raises a Luau error. Use them only for high-frequency, loss-tolerant data such as position updates or visual-only state.
+</Note>
+
+### `Delta.Function`
+
+Registers a request/response pair backed by a `RemoteFunction`. Accepts optional input types, output types, and an inline handler.
+
+```lua
+local GetActor = Delta.Function(
+    "GetActor",
+    { Delta.Instance },  -- input types
+    { Delta.Table }      -- response types
+)
+```
+
+## Built-In Types
+
+Every argument position in a DeltaNetwork event is validated against one of these type tags. Validation runs on the receiving side using the `Validation` module before any callback or handler fires.
+
+<CardGroup cols={2}>
+  <Card title="Delta.String" icon="text">
+    Expects `typeof(v) == "string"`.
+  </Card>
+  <Card title="Delta.Number" icon="hashtag">
+    Expects `typeof(v) == "number"`. Also aliased as `Delta.NumberF32`.
+  </Card>
+  <Card title="Delta.Boolean" icon="toggle-on">
+    Expects `typeof(v) == "boolean"`.
+  </Card>
+  <Card title="Delta.Instance" icon="cube">
+    Expects `typeof(v) == "Instance"`.
+  </Card>
+  <Card title="Delta.Table" icon="table">
+    Expects `typeof(v) == "table"`.
+  </Card>
+  <Card title="Delta.Buffer" icon="database">
+    Expects `typeof(v) == "buffer"`. Used by `PosSerdes` for packed position packets.
+  </Card>
+  <Card title="Delta.Vector3F24" icon="arrows-up-down-left-right">
+    Accepts a `Vector3`. The `F24` suffix signals that callers should pack this value into 24-bit fixed-point via `PosSerdes` before sending.
+  </Card>
+  <Card title="Delta.CFrameF24U8" icon="cube">
+    Accepts a `CFrame`. The `F24U8` suffix signals position packed to 24-bit and rotation quantized to an 8-bit yaw by `PosSerdes`.
+  </Card>
+  <Card title="Delta.NumberF16" icon="wave-square">
+    Accepts a `number`. The `F16` suffix marks it as a half-precision float — callers should constrain the value range accordingly to avoid precision loss.
+  </Card>
+  <Card title="Delta.Any" icon="asterisk">
+    Bypasses type validation entirely. Use sparingly; prefer a concrete type when possible.
+  </Card>
+</CardGroup>
+
+## Server-Side API
+
+Once you hold a DeltaType instance on the server, the following methods are available:
+
+<Accordion title="DeltaType.Server:Connect(cb)">
+Connects a callback that fires when any client sends this event to the server. The callback receives `(player: Player, ...args)`. Argument validation and rate-limit checks run before the callback is invoked.
+
+```lua
+MyEvent.Server:Connect(function(player, cframe, value)
+    print(player.Name, "fired MyEvent at", cframe, value)
+end)
+```
+</Accordion>
+
+<Accordion title="DeltaType:SendToClient(player, ...)">
+Fires the event to a single client.
+
+```lua
+MyEvent:SendToClient(player, CFrame.new(0, 10, 0), 42)
+```
+</Accordion>
+
+<Accordion title="DeltaType:Broadcast(...)">
+Fires the event to every connected client via `RemoteEvent:FireAllClients`.
+
+```lua
+MyEvent:Broadcast(CFrame.new(0, 10, 0), 42)
+```
+</Accordion>
+
+<Accordion title="DeltaType:BroadcastExcept(player, ...)">
+Fires to every player except the one specified.
+
+```lua
+MyEvent:BroadcastExcept(localPlayer, CFrame.new(0, 10, 0), 42)
+```
+</Accordion>
+
+<Accordion title="DeltaType:BatchBroadcast(players, ...)">
+Fires individually to a provided list of players. Useful when you want to target a subset without building a custom loop.
+
+```lua
+MyEvent:BatchBroadcast({ playerA, playerB }, CFrame.new(0, 10, 0), 42)
+```
+</Accordion>
+
+## Client-Side API
+
+<Accordion title="DeltaType.Client:Connect(cb)">
+Connects a callback that fires when the server sends this event to the local client. Argument validation still runs.
+
+```lua
+MyEvent.Client:Connect(function(cframe, value)
+    print("received MyEvent at", cframe, value)
+end)
+```
+</Accordion>
+
+<Accordion title="DeltaType:SendToServer(...)">
+Fires the event from the client to the server.
+
+```lua
+MyEvent:SendToServer(humanoidRootPart.CFrame, 1)
+```
+</Accordion>
+
+## Middleware
+
+`UseMiddleware` adds a pre-validation interceptor to a DeltaType. The middleware function receives `(player?, ...args)` and must return `(boolean, string?)`. If it returns `false`, the message is silently dropped and the reason is throttle-warned.
+
+```lua
+MyEvent:UseMiddleware(function(player, cframe, value)
+    if player:GetAttribute("Banned") then
+        return false, "player is banned"
+    end
+    return true
+end)
+```
+
+Multiple middleware functions can be chained — they execute in the order they were registered and all must pass before the final callback fires.
+
+## Rate Limiting
+
+`RateLimit` is server-only and constrains how many times a single player can send an event within a rolling window:
+
+```lua
+HitboxTouched:RateLimit({
+    MaxCalls = 30,
+    WindowSeconds = 1,
+})
+```
+
+Internally, `Policies.checkRateLimit` maintains a per-player timestamp list and performs a sliding-window count on every incoming message. Stale entries older than `WindowSeconds` are pruned every 5 seconds to prevent unbounded memory growth. When a player disconnects, their rate-limit data is automatically cleared via `Players.PlayerRemoving`.
+
+A global cap can also be set across all events for a single player:
+
+```lua
+Delta.SetGlobalRateLimit(200) -- max 200 cross-event calls per second
+```
+
+## Retry (Client → Server Requests)
+
+`Retry` configures automatic retry behaviour for request-type messages (`Delta.Function`). If the `RemoteFunction:InvokeServer` call throws, the client retries up to `maxRetries` times with `delaySeconds` between attempts.
+
+```lua
+GetActor:Retry(3, 0.5)
+-- up to 3 retries, 0.5 second delay between each
+```
+
+## Real-World Usage — Hitbox System
+
+The hitbox system's `init.luau` registers several events at module load time. These names and type signatures are authoritative across the codebase:
+
+```lua
+local HitboxTouched = Delta.Event("HitboxTouched", Delta.NumberF16)
+
+local VisualizerHitbox = Delta.Event(
+    "VisualizeHitbox",
+    Delta.CFrameF24U8,  -- hitbox CFrame
+    Delta.Vector3F24,   -- hitbox size
+    Delta.NumberF16,    -- damage
+    Delta.NumberF16,    -- lifetime
+    Delta.Boolean,      -- hit flag
+    Delta.String,       -- shape name
+    Delta.String        -- owner name
+)
+
+local SetClientCFramePacket = Delta.Event(
+    "SetClientCFrame",
+    Delta.Instance,     -- BasePart (ServerHitbox)
+    Delta.CFrameF24U8, -- position
+    Delta.Vector3F24,  -- velocity
+    Delta.Number        -- timestamp
+)
+
+local GetClientCFramePacket = Delta.Function(
+    "GetClientCFrame",
+    { Delta.Instance },
+    { Delta.CFrameF24U8 }
+)
+```
+
+`HitboxTouched` carries a `NumberF16` confirmation token from server to client after a hit is registered. `VisualizerHitbox` drives the in-game hitbox debug overlay. `SetClientCFramePacket` is the authoritative position channel feeding the `ClientSnapshots` lag-compensation buffer.
+
+## PosSerdes — Position Serialisation Utilities
+
+`PosSerdes` lives at `Modules/Shared/Network/PosSerdes` and provides two functions used by the character replication pipeline:
+
+```lua
+-- Serialise a CFrame + velocity + timestamp into a 34-byte buffer
+local data = PosSerdes.Serialize(rootPart.CFrame, rootPart.AssemblyLinearVelocity, workspace:GetServerTimeNow())
+
+-- Deserialise back
+local targetCFrame, velocity, timestamp = PosSerdes.Deserialize(data)
+```
+
+The buffer layout packs XYZ position as three `f32` values (12 bytes), yaw as a quantized `i16` (2 bytes, scale = 32767 / π), XYZ velocity as three `f32` values (12 bytes), and the timestamp as `f64` (8 bytes) — 34 bytes total. This compact representation is sent over the `CommunicatePos` `Delta.Buffer` event at 20 Hz per character.

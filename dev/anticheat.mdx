@@ -1,0 +1,344 @@
+---
+title: "Anticheat: Server-Side Exploit Detection System"
+sidebarTitle: "Anticheat"
+description: "Modular server-side anticheat with five built-in checks (SpeedHacking, Flying, Noclipping, Flinging, Backshotting), violation reporting, and a custom-check API."
+---
+
+Shattered Reality's anticheat runs entirely on the server, polling every connected player on each `Heartbeat` frame. It ships with five built-in detection modules, each following the same `BaseCheck` contract, and exposes a simple API for registering additional checks at runtime. Violations accumulate per-player and trigger a configurable `OnViolation` callback before issuing a kick.
+
+## Constructor
+
+```lua
+local Anticheat = require(path.to.Anticheat)
+
+local ac = Anticheat.new({
+    Enabled        = true,
+    AbilityThrottle = myThrottle, -- optional RateLimit object
+    OnViolation    = function(self, payload)
+        -- payload: { player, checkName, flag, reason, violationCount, maxViolations, kicked }
+        WebhookService:Log(payload)
+    end,
+})
+
+ac:Init()   -- connects Heartbeat and PlayerRemoving
+```
+
+| Config field | Type | Description |
+|---|---|---|
+| `Enabled` | `boolean` | Master switch; defaults to `true` when `nil` |
+| `AbilityThrottle` | object | Passed to `AbilityRequestValidator.new()` — see §Ability Throttle |
+| `OnViolation` | `function` | Called with a violation payload each time a check reaches `MaxViolations` |
+
+<Warning>
+`OnViolation` is called inside a `pcall`. If your callback errors, the error is only printed with `warn()` and the kick still proceeds. Wire this callback to `WebhookService:LogCommand()` so you have an audit trail of every player action that triggers the anticheat.
+</Warning>
+
+## Default Checks
+
+Five checks are registered automatically when `Anticheat.new()` is called:
+
+<CardGroup cols={2}>
+  <Card title="SpeedHacking — Flag 004" icon="gauge-max">
+    Compares measured horizontal displacement per sample against the character's expected walk/sprint speed plus configurable tolerances. Consecutive violations within a decay window trigger a strike.
+  </Card>
+  <Card title="Flying — Flag 002" icon="plane">
+    Tracks air time via a raycast ground check. Players airborne longer than `MaxAirTime` (1.6 s) with near-zero vertical velocity are flagged.
+  </Card>
+  <Card title="Noclipping — Flag 003" icon="cube">
+    Block-casts the player's movement vector each frame. If the sweep intersects a collidable, opaque part that the player passed through, a violation is recorded.
+  </Card>
+  <Card title="Flinging — Flag 001" icon="tornado">
+    Flags characters whose `AssemblyLinearVelocity` exceeds 115 studs/s horizontally **or** whose `AssemblyAngularVelocity` exceeds 60 rad/s while moving a minimum travel distance.
+  </Card>
+  <Card title="Backshotting — Flag 067" icon="crosshairs">
+    Detects rapid back-and-forth movement while positioned behind another player's character. Five direction switches within a 3-second window triggers a strike and kills the cheating character.
+  </Card>
+</CardGroup>
+
+## Check Configuration Reference
+
+Each built-in check exposes a `Configuration` table. Here are the real values from the source:
+
+<Tabs>
+  <Tab title="SpeedHacking">
+    ```lua
+    Module.Configuration = {
+        Enabled                = true,
+        SpawnGraceTime         = 1.5,
+        TeleportGraceDistance  = 20,
+        MinSampleTime          = 0.08,
+        BaseTolerance          = 6,
+        VelocityTolerance      = 8,
+        ViolationGoal          = 5,
+        ViolationDecayTime     = 1.25,
+    }
+    ```
+    `BaseTolerance` is added on top of the character's highest registered walk/sprint speed. `VelocityTolerance` is added on top of the root's live `AssemblyLinearVelocity` magnitude to handle short bursts.
+  </Tab>
+  <Tab title="Flying">
+    ```lua
+    Module.Configuration = {
+        Enabled               = true,
+        SpawnGraceTime        = 1.5,
+        TeleportGraceDistance = 20,
+        GroundCheckDistance   = 4.5,
+        MaxAirTime            = 1.6,
+        HoverVerticalSpeed    = 2.5,
+        ViolationGoal         = 3,
+        ViolationDecayTime    = 1.5,
+    }
+    ```
+    The ground check fires a downward raycast of `GroundCheckDistance` studs (4.5), excluding the character and `workspace.Players`. A player is considered grounded if `FloorMaterial ~= Air` **or** the raycast hits a collidable `BasePart`.
+  </Tab>
+  <Tab title="Noclipping">
+    ```lua
+    Module.Configuration = {
+        Enabled                   = true,
+        SpawnGraceTime            = 1.5,
+        TeleportGraceDistance     = 18,
+        MinMoveDistance           = 0.35,
+        ViolationGoal             = 3,
+        ViolationDecayTime        = 1.5,
+        SweepPadding              = Vector3.new(0.5, 0.5, 0.5),
+        StepHeightGrace           = 4,
+        StepNormalYGrace          = 0.35,
+        MinGroundedHorizontalMove = 0.2,
+    }
+    ```
+    The sweep size is `root.Size - SweepPadding`. Stair-step geometry is detected with a `StepNormalYGrace` normal-Y threshold and silently ignored.
+  </Tab>
+  <Tab title="Flinging">
+    ```lua
+    Module.Configuration = {
+        Enabled                    = true,
+        SpawnGraceTime             = 1.5,
+        TeleportGraceDistance      = 28,
+        HorizontalVelocityThreshold = 115,
+        AngularVelocityThreshold   = 60,
+        MinSampleTime              = 0.08,
+        MinTravelDistance          = 10,
+        ViolationGoal              = 5,
+        ViolationDecayTime         = 2.5,
+    }
+    ```
+  </Tab>
+  <Tab title="Backshotting">
+    ```lua
+    Module.Configuration = {
+        Enabled              = true,
+        MinForwardSpeed      = 3,
+        MaxDistance          = 5,
+        RearDotThreshold     = -0.2,
+        AlignDotThreshold    = 0.35,
+        SwitchGoal           = 5,
+        SwitchWindow         = 3,
+        PersistTime          = 0.25,
+        DetectionCooldown    = 1.0,
+        PunishRagdollDuration = 4,
+        PunishRespawnDelay   = 4,
+        Debug                = false,
+    }
+    ```
+    Unlike other checks, the Backshotting penalty **kills** the player (sets `humanoid.Health = 0`) rather than kicking immediately, applying `PunishRagdollDuration` and `PunishRespawnDelay` attributes first. A kick only happens after `MaxViolations` (3) kills.
+  </Tab>
+</Tabs>
+
+## API Reference
+
+### Core Methods
+
+<Accordion title="Anticheat:Init()">
+Connects a `RunService.Heartbeat` listener that calls `Tick()` every frame and a `PlayerRemoving` listener that destroys per-player check state. Safe to call only once — subsequent calls are no-ops.
+</Accordion>
+
+<Accordion title="Anticheat:Tick()">
+Iterates all players and all registered checks. For each enabled check, retrieves or creates the player's per-check state and calls `state:Check(player)`. Errors inside a check are caught with `pcall` and printed.
+</Accordion>
+
+<Accordion title="Anticheat:RegisterCheck(name, module)">
+Registers a check module under `name`. The check is enabled automatically if `module.Configuration.Enabled == true`.
+
+```lua
+ac:RegisterCheck("MyCustomCheck", MyCheckModule)
+```
+</Accordion>
+
+<Accordion title="Anticheat:SetCheckEnabled(name, enabled)">
+Enables or disables a check by name. When disabled, all existing `PlayerCheckStates` for that check are destroyed immediately, calling `state:Destroy()` if present.
+
+```lua
+ac:SetCheckEnabled("Flying", false)
+```
+</Accordion>
+
+<Accordion title="Anticheat:IsCheckEnabled(name) → boolean">
+Returns `true` only if the master `Enabled` flag is `true` **and** the named check is enabled. Always returns `false` if `Anticheat.Enabled == false`.
+</Accordion>
+
+<Accordion title="Anticheat:ReportViolation(payload)">
+Calls `self.OnViolation(self, payload)` inside a `pcall`. The payload table produced by `BaseCheck:Strike()` contains:
+
+| Field | Type | Description |
+|---|---|---|
+| `player` | `Player` | The offending player |
+| `checkName` | `string` | Registered name of the check |
+| `flag` | `string` | Three-digit flag code (e.g. `"004"`) |
+| `reason` | `string` | Human-readable message + flag |
+| `violationCount` | `number` | Current strike count |
+| `maxViolations` | `number` | Threshold from `Penalty.MaxViolations` |
+| `kicked` | `boolean` | Whether the player was still in-game |
+</Accordion>
+
+<Accordion title="Anticheat:DestroyPlayerStates(player)">
+Called automatically on `PlayerRemoving`. Iterates all per-check states for the player and calls `state:Destroy()` on each.
+</Accordion>
+
+<Accordion title="Anticheat:SanitizeAbilityPayload(player, payload)">
+Delegates to `PayloadSanitizer.SanitizeAbilityPayload`. See §Payload Sanitizer below.
+</Accordion>
+
+<Accordion title="Anticheat:ValidateAbilityRequest(player, actor, abilityName, request)">
+Delegates to `AbilityRequestValidator:Validate`. See §Ability Throttle below.
+</Accordion>
+
+## BaseCheck Pattern
+
+All built-in checks (and any custom checks) follow the `BaseCheck` contract. A check module is a plain table with these fields:
+
+```lua
+local MyCheck = {}
+
+-- Descriptor shown in violation payloads
+MyCheck.Descriptor = {
+    Flag    = "099",
+    Message = "Custom violation detected",
+}
+
+-- How many strikes before a kick
+MyCheck.Penalty = {
+    MaxViolations = 3,
+}
+
+-- Whether this check runs by default
+MyCheck.Configuration = {
+    Enabled = true,
+    -- ...your thresholds...
+}
+
+-- Called every Heartbeat for each player
+function MyCheck:Check(player: Player)
+    -- inspect player.Character, HumanoidRootPart, etc.
+    if suspiciousCondition then
+        self:Strike()  -- increments ViolationCount; kicks at MaxViolations
+    end
+end
+
+-- Optional lifecycle hooks
+function MyCheck:Init()   end
+function MyCheck:Destroy() end
+
+return MyCheck
+```
+
+`BaseCheck.new(module, player, manager, name)` merges all non-function fields from `module` into a fresh state object and sets up `ViolationCount = 0`. Custom checks can provide a `CreateState` factory instead:
+
+```lua
+function MyCheck.CreateState(player, manager, name)
+    local state = BaseCheck.new(MyCheck, player, manager, name)
+    state.MyExtraField = 0
+    return setmetatable(state, { __index = function(_, k)
+        return MyCheck[k] or BaseCheck[k]
+    end })
+end
+```
+
+## Ability Throttle
+
+`AbilityRequestValidator` wraps an optional `AbilityThrottle` rate-limiter to block ability-fire spam. `Validate` performs these checks in order:
+
+1. Player has a loaded character that is not emoting
+2. `actor` exists and `actor:CanUseAbility()` returns true
+3. The throttle key `"{UserId}:{abilityName}"` is allowed by `AbilityThrottle:Allow(key)`
+4. `actor.AbilitiesDisabled ~= true`
+5. No active cancel-context is blocking the ability
+6. The ability name resolves to a known ability in `actor.AbilityManager`
+
+On success it returns `true, nil, currentAbility`. On failure it returns `false, reasonString`.
+
+## Payload Sanitizer
+
+`PayloadSanitizer.SanitizeAbilityPayload(player, payload)` strips untrusted remote data before any server logic processes it. The rules are:
+
+- `Ability` must be a non-empty string
+- `PressedCFrame` is clamped: if the client-provided position is more than **20 studs** from the server-authoritative `HumanoidRootPart`, it is replaced with the server CFrame
+- `AimPlatform` must be a string or is dropped
+- `PlacementData` must be a table or is dropped
+
+```lua
+local clean = Anticheat:SanitizeAbilityPayload(player, remotePayload)
+if not clean then
+    return -- invalid payload, ignore
+end
+```
+
+<Note>
+`PlayerCheckStates` is a per-instance map keyed by `Player`. Each entry is itself a map from check name to the state object returned by `CreateState` (or `BaseCheck.new`). Disabling a check via `SetCheckEnabled` immediately calls `state:Destroy()` on all existing player states for that check, preventing stale timers or connections from persisting.
+</Note>
+
+## Writing a Custom Check
+
+<Steps>
+  <Step title="Create the module">
+    Add a new `ModuleScript` under `Anticheat/Checks/` (or any accessible path). Fill in `Descriptor`, `Penalty`, and `Configuration`.
+
+    ```lua
+    local BaseCheck = require(script.Parent.BaseCheck)
+
+    local Module = {
+        Descriptor  = { Flag = "099", Message = "WallRunning detected" },
+        Penalty     = { MaxViolations = 3 },
+        Configuration = {
+            Enabled           = true,
+            SpawnGraceTime    = 1.5,
+            MaxWallContactTime = 2.0,
+        },
+    }
+
+    function Module.CreateState(player, manager, name)
+        local state = BaseCheck.new(Module, player, manager, name)
+        state.WallContactSince = 0
+        return setmetatable(state, { __index = function(_, k)
+            return Module[k] or BaseCheck[k]
+        end })
+    end
+
+    function Module:Check(player)
+        local character = player.Character
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+
+        -- ... detection logic using self.WallContactSince ...
+        if violating then
+            self:Strike()
+        end
+    end
+
+    function Module:Init()    end
+    function Module:Destroy() end
+
+    return Module
+    ```
+  </Step>
+  <Step title="Register at boot">
+    Require the module and call `RegisterCheck` before `Init`.
+
+    ```lua
+    local WallRunning = require(path.to.WallRunning)
+    ac:RegisterCheck("WallRunning", WallRunning)
+    ac:Init()
+    ```
+  </Step>
+  <Step title="Verify in OnViolation">
+    When a player triggers your check, the `OnViolation` callback receives `checkName = "WallRunning"` and `flag = "099"`. Route those payloads to your logging pipeline.
+  </Step>
+</Steps>

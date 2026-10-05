@@ -1,0 +1,213 @@
+---
+title: "Hitbox System: Lag-Compensated Combat Detection"
+sidebarTitle: "Hitbox System"
+description: "Architecture guide for Shattered Reality's hitbox pipeline—covering CastSystem sweep logic, ClientSnapshots rewind buffering, HitboxWorld tick loop, and Execution."
+---
+
+Shattered Reality's hitbox system is a server-authoritative, lag-compensated combat detection pipeline. Rather than trusting purely client-reported positions, the server maintains a rolling buffer of each player's character CFrames, rewinds that buffer by the player's measured network ping, and sweeps the hitbox volume through intermediate positions between ticks. This catches fast-moving hits that a single per-frame overlap check would miss, while keeping the server in full control of damage application.
+
+The system is composed of four modules assembled in `init.luau`:
+
+<CardGroup cols={2}>
+  <Card title="CastSystem" icon="crosshairs">
+    Core sweep and lag-compensation logic. Resolves the hitbox's world CFrame each tick (blending server and client-predicted positions), walks intermediate sweep steps, collects overlapping humanoids and objects, and dispatches `HumanoidTouched` / `ObjectTouched` signals.
+  </Card>
+  <Card title="HitboxWorld" icon="globe">
+    OOP registry and heartbeat runner. Holds all live `Hitbox` objects in an `entities` table and calls `CastSystem.run(hitbox, dt)` for each one every `RunService.Heartbeat`.
+  </Card>
+  <Card title="ClientSnapshots" icon="clock-rotate-left">
+    Circular snapshot buffer. Receives `SetClientCFrame` packets from clients and stores up to `SNAPSHOT_CAPACITY` timestamped CFrame + velocity samples per part per player. Exposes `Sample(player, part, targetTime)` for interpolated rewind lookups.
+  </Card>
+  <Card title="Execution" icon="bolt">
+    Damage application layer. Called by `CastSystem`'s hit handler to apply damage, trigger executions on killing blows, and notify the owning actor's skin behavior module.
+  </Card>
+</CardGroup>
+
+---
+
+## Constants
+
+These values are defined at the top of `init.luau` and govern the whole system's behaviour:
+
+```lua
+local MAX_CLIENT_DELTA       = 12    -- studs: max allowed hitbox drift from server position
+local DEFAULT_SWEEP_STEPS    = 6     -- intermediate positions sampled between frames
+local HIGHLIGHT_DURATION     = 0.35  -- seconds a debug highlight lasts after a hit
+local SNAPSHOT_CAPACITY      = 40    -- max CFrame samples stored per part per player
+local MAX_CLIENT_REWIND      = 0.22  -- seconds: upper bound on lag compensation rewind
+local MIN_CLIENT_REWIND      = 0.005 -- seconds: lower bound on rewind (avoids zero)
+local MAX_CLIENT_PREDICTION  = 0.33  -- seconds: how far ahead a client position can be predicted
+local MAX_CLIENT_SNAPSHOT_DRIFT = 80 -- studs: snapshot discarded if too far from actual part
+local BEAN_CLIENT_REWIND_FACTOR = 0.5 -- scales ping for bean broadcast CFrame sampling
+local BEAN_BROADCAST_INTERVAL = 1 / 30 -- seconds between bean state broadcasts
+```
+
+---
+
+## Hitbox Shapes
+
+Three shape modes are available via `Hitbox.Shapes`:
+
+```lua
+Hitbox.Shapes = {
+    Box    = "Box",    -- oriented bounding box, tested with GetPartBoundsInBox
+    Circle = "Circle", -- radius sphere, tested with GetPartBoundsInRadius
+    Radius = "Radius", -- alias for Circle
+}
+```
+
+Box hitboxes support swept intermediate positions and respect `Offset` as a `CFrame` applied on top of the base part's transform. Circle and Radius hitboxes derive their radius from either the explicit `Radius` field or `math.max(Size.X, Size.Z) * 0.5`.
+
+---
+
+## Creating and Firing a Hitbox
+
+A hitbox is constructed with `Hitbox.new(Data)` and activated with `Hitbox:CreateHitbox()`. Between construction and activation you can wire up `HumanoidTouched` and `ObjectTouched` signals. Below is the real Slash ability from JohnDoe's server script:
+
+```lua
+local newHitbox = Hitbox.new({
+    Owner        = Character,
+    Blacklist    = { Character },
+    HitType      = "StopOnHit",         -- destroy after first humanoid hit
+    Damage       = slashConfig.Damage,  -- 16
+    WallBlockable = true,
+    WallBlockDamage = slashConfig.Damage,
+    Part         = Character.ServerHitbox,
+    Offset       = slashConfig.HitboxOffset,  -- CFrame.new(0, -1, -4)
+    Size         = slashConfig.HitboxSize,    -- Vector3.new(4.5, 6, 5.2)
+    Amount       = slashConfig.HitboxAmount,  -- 16 casts max
+    Delay        = slashConfig.HitboxDelay,   -- 0.011 s between casts
+    Lifetime     = slashConfig.HitboxLifetime, -- 0.16 s auto-destroy
+    ExecuteOnKill = true,
+    CanClash     = true,
+})
+
+-- Wire hit response before registering
+newHitbox.HumanoidTouched:Connect(function(_, character)
+    Util:ConfirmHit(character)
+    -- apply speed bonus, play SFX, etc.
+end)
+
+-- Spawn delay before the hitbox goes live
+task.delay(slashConfig.HitboxSpawnDelay, function()  -- 0.4 s
+    if cancelCtx.Cancelled or Character:GetAttribute("Stunned") then
+        return
+    end
+    newHitbox:CreateHitbox()  -- registers into HitboxWorld, starts ticking
+end)
+```
+
+And the projectile hitbox factory used by Impale — a `HitboxFactory` callback that creates the hitbox configuration for a moving spike projectile:
+
+```lua
+HitboxFactory = function(activeProjectile)
+    return {
+        Owner        = Character,
+        Blacklist    = { Character, activeProjectile.Instance },
+        HitType      = "Default",
+        HitOnce      = true,
+        BarrierBreaker = true,
+        WallBlockable  = true,
+        Part    = activeProjectile.Instance:FindFirstChild("Main")
+                    or activeProjectile.RootPart,
+        Offset  = impaleConfig.HitboxOffset,   -- CFrame.new(0, 0, 0)
+        Size    = baseHitboxSize,               -- Vector3.new(5.5, 4.25, 5.5)
+        Amount  = impaleConfig.HitboxAmount,    -- 100
+        Delay   = impaleConfig.HitboxDelay,     -- 0.01 s
+        Lifetime = impaleConfig.HitboxLifetime, -- 2 s
+    }
+end,
+```
+
+---
+
+## Lag Compensation Pipeline
+
+Each `HitboxWorld` tick calls `CastSystem.run(hitbox, dt)`, which resolves the hitbox CFrame through two parallel paths:
+
+<Steps>
+  <Step title="Server CFrame">
+    `api.resolveServerCFrame` reads `hitbox.Part.CFrame` and optionally adds a small forward-bias prediction based on the part's `AssemblyLinearVelocity`, keeping the server position authoritative.
+  </Step>
+  <Step title="Client CFrame">
+    `api.resolveClientCFrame` checks whether `hitbox.UseClient` is set (only enabled for player-owned parts). It calls `clientSnapshots.Sample` at `now - ping × 0.5`, interpolating between stored snapshots. If the snapshot is missing, it bootstraps one via a synchronous `GetClientCFramePacket` remote call.
+  </Step>
+  <Step title="CFrame Selection">
+    If a valid client CFrame was found, it is used as the final `base` CFrame. The correction vector between the client and server positions is clamped to `ClientDeltaAllowance` (default `MAX_CLIENT_DELTA = 12` studs) plus speed-based and ping-based allowances, preventing cheated positions from skipping far ahead.
+  </Step>
+  <Step title="Sweep Steps">
+    `api.sweepSteps` calculates how many intermediate positions to test based on the hitbox's displacement since the last tick versus its smallest dimension. Up to `DEFAULT_SWEEP_STEPS = 6` intermediate CFrames are lerped and tested with `api.collectHits`, ensuring fast-moving hitboxes don't tunnel through targets.
+  </Step>
+  <Step title="Hit Dispatch">
+    Collected humanoid hits are sorted by distance and dispatched through `api.dispatchHumanoids`. Each candidate is checked for IFrames, StunIFrames, friendly fire, line-of-sight (`api.hasLineOfSight`), and hit cooldown before `HumanoidTouched` fires.
+  </Step>
+</Steps>
+
+---
+
+## ClientSnapshots Buffer
+
+`ClientSnapshots` is a per-player, per-part circular buffer of CFrame snapshots:
+
+```lua
+-- Snapshot entry shape
+{
+    time     = serverTimestamp,  -- workspace:GetServerTimeNow() at receipt
+    cframe   = CFrame,           -- client-reported part CFrame
+    velocity = Vector3,          -- part linear velocity at snapshot time
+}
+```
+
+The server receives entries via the `SetClientCFrame` DeltaNetwork event. A snapshot is rejected if:
+- The reported CFrame is more than `MAX_CLIENT_SNAPSHOT_DRIFT = 80` studs from the actual part position.
+- The timestamp is more than 0.25 s in the future or more than 1 s in the past.
+- The timestamp is not strictly newer than the last stored sample.
+
+`Sample(player, part, targetTime)` returns an **interpolated** snapshot between the two bracketing samples, giving smooth rewind even at low snapshot frequencies.
+
+---
+
+## The Bean Hitbox
+
+Characters use a simplified "bean" capsule geometry for fast server-side position validation. Every `BEAN_BROADCAST_INTERVAL` (1/30 s) the server computes each player's bean state using:
+
+```lua
+function Hitbox.GetCharacterBeanGeometry(character, rootPart)
+    local diameter = math.max(3.5, math.max(rootPart.Size.X, rootPart.Size.Z) * 1.75)
+    local height   = math.max(5, rootPart.Size.Y
+                        + ((humanoid.HipHeight or 2) * 2.5))
+    local yOffset  = math.max(0.25, (height - rootPart.Size.Y) * 0.2)
+    return Vector3.new(diameter, height, diameter), yOffset
+end
+```
+
+The synced root CFrame used is sampled at `now - ping × BEAN_CLIENT_REWIND_FACTOR` (i.e., half the measured ping), which gives a lag-adjusted "where the client actually was" rather than the raw server-side position.
+
+<Note>
+`BEAN_CLIENT_REWIND_FACTOR = 0.5` means the bean position is rewound by **half** the player's ping, not the full ping. This is intentional — the bean is used for rough position validation, not exact hit detection, and a smaller rewind reduces the window for exploitation while still accounting for most network jitter.
+</Note>
+
+---
+
+## Visualizer System
+
+When `HITBOX_VISUALIZER_ENABLED = true` (the default), `CastSystem` fires the `VisualizerHitbox` DeltaNetwork event to all clients after each cast:
+
+```lua
+local VisualizerHitbox = Delta.Event(
+    "VisualizeHitbox",
+    Delta.CFrameF24U8,  -- hitbox world CFrame
+    Delta.Vector3F24,   -- hitbox size
+    Delta.NumberF16,    -- hitbox ID
+    Delta.NumberF16,    -- cast amount remaining
+    Delta.Boolean,      -- isOwner (true for the player who owns this hitbox)
+    Delta.String,       -- source tag ("Resolved")
+    Delta.String        -- shape ("Box", "Circle", etc.)
+)
+```
+
+Clients render a brief highlight lasting `HIGHLIGHT_DURATION = 0.35` seconds. The `isOwner` flag lets the client-side renderer distinguish between "my hitbox" and "someone else's hitbox" for colour-coding purposes.
+
+<Tip>
+Players can enable the **ShowOwnClientServerHitboxes** setting to render their own hitbox volumes in real time during gameplay. This is the fastest way to verify that ability hitbox offsets and sizes are placed correctly relative to the character, without needing to instrument the server or add debug prints.
+</Tip>

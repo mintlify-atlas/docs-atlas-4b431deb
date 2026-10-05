@@ -1,0 +1,219 @@
+---
+title: "Status Effects: Stackable Buffs and Debuffs"
+sidebarTitle: "Status Effects"
+description: "Reference for all 16 status effects in Shattered Reality, covering stacking rules, level tables, the module contract, and deep dives on complex ticking effects."
+---
+
+Status effects are modular, time-limited state changes applied to any character in the game. Each effect lives in its own Luau module under `ReplicatedStorage/Modules/Shared/Gameplay/StatusEffects/` and exposes a uniform contract that the `StatusManager` (client) and `StatusEffectsService` (server) both consume. Effects can be positive buffs, negative debuffs, or purely cosmetic, and many support multiple levels that alter their potency.
+
+The `ManageStatus` DeltaNetwork event carries the `CreateStatus`, `UpdateStatus`, and `RemoveStatus` modes between the server and the client's `StatusManager`. When a status is created, `StatusManager` calls `module.Apply(character, levelValue, status)` immediately and then begins ticking `module.Tick(character, dt, status)` on a per-second interval until the duration expires or the status is removed.
+
+---
+
+## Module Contract
+
+Every status effect module exposes the following fields and functions:
+
+| Field / Function | Type | Description |
+|---|---|---|
+| `Kind` | `"Positive"` \| `"Negative"` | Whether this effect is beneficial or harmful |
+| `Duration` | `number` | Default duration in seconds |
+| `MaxLevel` | `number` | Highest valid level index |
+| `Stackable` | `boolean?` | If `true`, multiple instances at different levels can coexist on the same character |
+| `TimeStackable` | `boolean?` | If `false`, re-applying the same effect resets instead of extending the timer |
+| `Description` | `string` | Human-readable tooltip shown in the status HUD |
+| `Levels` | `table?` | Per-level data (damage, multiplier, etc.) — see individual effects below |
+| `Apply(character, levelValue, status)` | `function` | Called once when the effect is activated; sets attributes or triggers VFX |
+| `Clear(character, status)` | `function` | Called when the effect expires or is forcibly removed |
+| `Tick(character, dt, status)` | `function?` | Called each heartbeat tick (server-side) for effects that deal damage or restore HP over time |
+| `CanApply(character)` | `function?` | Optional gate; if it returns `false`, the effect is blocked (e.g., Stunned checks `StunProtection`) |
+
+---
+
+## Quick-Reference Table
+
+| Name | Kind | MaxLevel | TimeStackable / Stackable | Description |
+|---|---|---|---|---|
+| Bleed | Negative | 5 | `Stackable = true` | Deals damage over time and stops at 10 HP. |
+| Burning | Negative | 3 | `TimeStackable = false` | Deals damage over time. |
+| Poisoned | Negative | 1 | `TimeStackable = false` | Marks the target as poisoned. |
+| Slowness | Negative | 4 | `TimeStackable = false` | Reduces movement speed. |
+| Stunned | Negative | 1 | `TimeStackable = false` | Fully interrupts movement and actions. |
+| Corrupted | Negative | 6 | `TimeStackable = false` | Deals nonlethal corruption damage over time. |
+| Weaken | Negative | 2 | `TimeStackable = false` | Reduces outgoing damage. |
+| Suppressed | Negative | 1 | `Stackable = false`, `TimeStackable = false` | Prevents ability use. |
+| HearingLoss | Negative | 3 | `TimeStackable = false` | Muffles game audio. |
+| Blindness | Negative | 3 | *(no stacking flags)* | Blurs your vision. |
+| Speed | Positive | 3 | `TimeStackable = false` | Increases movement speed. |
+| Strength | Positive | 3 | `TimeStackable = false` | Increases outgoing damage. |
+| Resistance | Positive | 10 | `TimeStackable = false` | Reduces incoming damage. |
+| Regeneration | Positive | 15 | `TimeStackable = false` | Restores health over time. |
+| Invisibility | Positive | 5 | `TimeStackable = false` | Makes the target translucent. |
+| Undetectable | Positive | 5 | `TimeStackable = false` | Reduces footstep volume. |
+
+---
+
+## Deep Dives
+
+### Bleed
+
+Bleed is the only effect with `Stackable = true`, meaning multiple instances at different levels can run simultaneously on the same character. Five levels are defined, each with a faster tick interval and higher damage per tick. Crucially, damage is capped so that the victim's health can never fall below **10 HP** — Bleed cannot kill.
+
+```lua
+Bleed.Kind      = "Negative"
+Bleed.Duration  = 10
+Bleed.MaxLevel  = 5
+Bleed.Stackable = true
+Bleed.Description = "Deals damage over time and stops at 10 HP."
+
+Bleed.Levels = {
+    [1] = { TimeBetweenTicks = 1,     Damage = 2    },
+    [2] = { TimeBetweenTicks = 0.9,   Damage = 2    },
+    [3] = { TimeBetweenTicks = 0.85,  Damage = 3    },
+    [4] = { TimeBetweenTicks = 0.7,   Damage = 3.25 },
+    [5] = { TimeBetweenTicks = 0.625, Damage = 4    },
+}
+```
+
+The `Tick` function enforces the floor explicitly:
+
+```lua
+function Bleed.Tick(character, dt, status)
+    if not RunService:IsServer() then return end
+    -- ...
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 10 then return end
+
+    local damage = math.min(data.Damage, math.max(humanoid.Health - 10, 0))
+    if damage <= 0 then return end
+
+    Util:ApplyDamage({
+        Owner      = status.Data and status.Data.Source,
+        Humanoid   = humanoid,
+        Character  = character,
+        Damage     = damage,
+        DamageType = "Bleed",
+        StatusName = "Bleed",
+        StatusEffect = true,
+    })
+end
+```
+
+JohnDoe's Impale ability applies Bleed with per-hit level and duration scaling: `BleedLevel * bleedScale` and `BleedDuration * bleedScale`, where `bleedScale` decreases by `BleedFalloffPerExtraHit` for each subsequent target pierced.
+
+---
+
+### Burning
+
+Burning ticks every 0.5 seconds across all three levels. Unlike Bleed, it **can** reduce health to zero and kill the target. `TimeStackable = false` means re-applying Burning at any level resets the timer rather than stacking a parallel instance.
+
+```lua
+Burning.Kind       = "Negative"
+Burning.Duration   = 10
+Burning.MaxLevel   = 3
+Burning.TimeStackable = false
+Burning.Description = "Deals damage over time."
+
+Burning.Levels = {
+    [1] = { TimeBetweenTicks = 0.5, Damage = 1 },
+    [2] = { TimeBetweenTicks = 0.5, Damage = 2 },
+    [3] = { TimeBetweenTicks = 0.5, Damage = 3 },
+}
+```
+
+`Apply` sets the `Burning` character attribute to `true` (server-side only), which can be read by other systems to drive VFX or conditional logic. `Clear` removes that attribute.
+
+---
+
+### Poisoned
+
+Poisoned is a level-1 effect with no tick damage of its own — it acts as a marker. On `Apply`, it sets the `Poisoned` character attribute to `true` **and** clones a `poisonvfx` child from the module script, parenting individual particle emitters into the character's body parts by folder name:
+
+```lua
+function Poisoned.Apply(character)
+    character:SetAttribute("Poisoned", true)
+
+    local poisonVFX = script:FindFirstChild("poisonvfx")
+    if not poisonVFX then return end
+
+    clearVFX(character)
+    for _, bodyFolder in ipairs(poisonVFX:GetChildren()) do
+        local bodyPart = bodyFolder:IsA("Folder")
+            and getBodyPart(character, bodyFolder.Name)
+        if bodyPart then
+            for _, vfx in ipairs(bodyFolder:GetChildren()) do
+                local clone = vfx:Clone()
+                clone:SetAttribute(POISON_VFX_ATTRIBUTE, true)
+                clone.Parent = bodyPart
+            end
+        end
+    end
+end
+```
+
+`Clear` removes every descendant that carries the `PoisonedVFX` attribute and clears the `Poisoned` flag.
+
+---
+
+### Stunned
+
+Stunned has the most complex `Apply` and `Clear` implementations of any effect. On the **server** it zeros out `WalkSpeed`, `JumpPower`, `JumpHeight`, and `AutoRotate`, then locks abilities via `AbilityManager`. On the **client** (local character only) it plays stun animations and applies a `SpeedMultiplier` of `0` via `MultiplierManager`. A reference count (`_StunnedActiveCount`) tracks overlapping stun applications so the effect is only lifted once all sources clear.
+
+After a stun ends, a `StunForceField` is parented to the character and the `StunIFrames` attribute is set — protecting the target from a new stun for a base duration of 5 seconds, plus 1 additional second per living Sentinel-class actor on the server.
+
+<Warning>
+`Stunned.CanApply` checks `StunProtection` and `StunIFrames` attributes before allowing a new stun. Always call `CanApply` before applying this effect programmatically.
+</Warning>
+
+---
+
+### Corrupted
+
+Corrupted lives in the `KillerSpecific` subfolder and is used exclusively by killers that deal corruption damage. It behaves like Bleed but with a lower floor — health can drop to **1 HP** but not zero, making it nonlethal.
+
+```lua
+Corrupted.Kind     = "Negative"
+Corrupted.Duration = 10
+Corrupted.MaxLevel = 6
+Corrupted.Description = "Deals nonlethal corruption damage over time."
+
+Corrupted.Levels = {
+    [1] = { TimeBetweenTicks = 0.5,  Damage = 0.75  },
+    [2] = { TimeBetweenTicks = 0.45, Damage = 1.125 },
+    [3] = { TimeBetweenTicks = 0.4,  Damage = 1.6   },
+    [4] = { TimeBetweenTicks = 0.35, Damage = 1.925 },
+    [5] = { TimeBetweenTicks = 0.3,  Damage = 2.25  },
+    [6] = { TimeBetweenTicks = 0.25, Damage = 2.5   },
+}
+```
+
+`Apply` also sets a `CorruptedStacks` attribute equal to `status.Level`, which client-side VFX scripts can read to scale visual intensity.
+
+---
+
+### Resistance and Strength / Weaken
+
+These three multiplier effects write a single attribute that is consumed by the damage pipeline:
+
+| Effect | Attribute Set | Level Values |
+|---|---|---|
+| Resistance | `StatusResistanceMultiplier` | `1 - (level × 0.2)`, capped at 1.0 (max level 10 = full immunity) |
+| Strength | `StatusStrengthMultiplier` | `1.15`, `1.30`, `1.50` |
+| Weaken | `StatusWeakenMultiplier` | `0.85`, `0.70` |
+
+---
+
+### HearingLoss and Blindness
+
+Both effects operate **client-side only** — they have no server-side apply path.
+
+- **HearingLoss** creates an `EqualizerSoundEffect` on the `Chases`, `SoundTrack`, and `Voicelines` SoundGroups and tweens its `HighGain`, `MidGain`, and `LowGain` to progressively muffle audio across 3 levels.
+- **Blindness** instantiates a `BlurEffect` in `Lighting` and tweens its `Size` to `15 × level × 1.25`. An optional `Flash` flag in `status.Data` triggers a bright exposure spike before the blur settles.
+
+---
+
+## The KillerSpecific Subfolder
+
+<Note>
+Effects inside `StatusEffects/KillerSpecific/` are tied to a specific killer's mechanics. `StatusManager` uses a recursive search (`resolveModule`) that walks into subfolders automatically, so these effects are registered and ticked by the same pipeline as top-level effects. The subfolder is purely organizational — it signals to contributors that the effect should not be applied by arbitrary abilities.
+</Note>

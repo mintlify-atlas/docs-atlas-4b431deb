@@ -1,0 +1,226 @@
+---
+title: "Gamemodes: Classic, Double Trouble, One Bounce, Powerhouse"
+sidebarTitle: "Gamemodes"
+description: "A complete reference for all four Shattered Reality gamemodes—their rules, timing, stat modifiers, and how the ApplyActorModifiers contract works."
+---
+
+Shattered Reality's gamemode system lets entirely different rule-sets share a single round lifecycle. At the start of each round, `RoundUtil:SelectGamemode` picks a mode from those with a positive `Weight` value, subject to the current player count meeting the mode's `MinPlayers` threshold. Once selected, the mode's `StartRound` method bootstraps actor assignment, and its `ApplyActorModifiers` method patches individual humanoid stats before each actor enters the map.
+
+Every gamemode module follows an OOP pattern using metatables — all methods are looked up through `Mode.__index = Mode`, so the same table serves as both the definition object and the runtime instance:
+
+```lua
+-- Every gamemode exposes these core hooks
+Mode:StartRound(context, session)        -- selects killers, creates survivors, returns runtime
+Mode:ApplyActorModifiers(actor, player, spawnData) -- adjusts humanoid/config in-place
+Mode:GetRoundTime(session)               -- returns total round duration in seconds
+Mode:GetSurvivorDeathTimeBonus(session, character) -- seconds added when a survivor dies
+Mode:AdjustRoundReward(context, reward, participant) -- scales reward tables per participant
+```
+
+<Note>
+Any gamemode with `Mode.Weight = 0` is **not** part of the normal random rotation. These modes must be explicitly started via the `ForceNextGamemode` admin command or a direct server call. Currently, Double Trouble, One Bounce, and Powerhouse all carry `Weight = 0`.
+</Note>
+
+---
+
+## Gamemode Reference
+
+<Tabs>
+  <Tab title="Classic">
+    Classic is the default gamemode and the only one that enters random rotation under standard server rules. One killer hunts a lobby of survivors for 140 seconds.
+
+    | Property | Value |
+    |---|---|
+    | `Mode.Name` | `"Classic"` |
+    | `Mode.MinPlayers` | `2` |
+    | `Mode.RoundTime` | `140` seconds |
+    | `Mode.Weight` | *(unset — eligible for rotation)* |
+    | Killers | 1 |
+
+    **Survivor goal:** Survive until time runs out, or complete map objectives.
+
+    **Killer goal:** Eliminate every survivor before time expires.
+
+    Classic applies no stat modifications through `ApplyActorModifiers` — all actors spawn with their default character config values unchanged.
+
+    ```lua
+    local Mode = {}
+    Mode.__index = Mode
+
+    Mode.Name       = "Classic"
+    Mode.MinPlayers = 2
+    Mode.RoundTime  = 140
+
+    function Mode:StartRound(context, session)
+        return context.ActorSetup.StartRound(context, session, self)
+    end
+    ```
+  </Tab>
+
+  <Tab title="Double Trouble">
+    Double Trouble fields two killers simultaneously. To compensate, killer stats are reduced and survivors receive extra stamina and a time extension each time one of them is eliminated.
+
+    | Property | Value |
+    |---|---|
+    | `Mode.Name` | `"DoubleKiller"` |
+    | `Mode.DisplayName` | `"Double Trouble"` |
+    | `Mode.MinPlayers` | `4` |
+    | `Mode.RoundTime` | `150` seconds |
+    | `Mode.Weight` | `0` |
+    | `Mode.KillerCount` | `2` |
+    | `Mode.SurvivorDeathTimeBonus` | `15` seconds |
+    | `Mode.SurvivorCooldownMultiplier` | `0.9` |
+
+    **ApplyActorModifiers** changes applied per role:
+
+    | Stat | Survivor | Killer |
+    |---|---|---|
+    | `MaxHealth` | 200 (if ≤ 2 survivors) / 100 otherwise | × 0.7 |
+    | `Config.Damage` | — | × 0.75 |
+    | `SprintConfig.Stamina` | 150 | — |
+    | `SprintConfig.MaxStamina` | 150 | × 0.8 |
+    | `SprintConfig.SprintGain` | × 1.2 | — |
+    | `DoubleTroubleSurvivorCooldownMultiplier` attribute | 0.9 | — |
+
+    ```lua
+    function Mode:ApplyActorModifiers(actor, player, spawnData)
+        local character = player.Character
+        local humanoid  = character and character:FindFirstChildOfClass("Humanoid")
+        if not humanoid then return end
+
+        actor.Config.SprintConfig = actor.Config.SprintConfig or {}
+        if actor.ActorType == "Survivor" then
+            local survivorCount  = tonumber(spawnData and spawnData.RoundSurvivorCount) or 0
+            local targetHealth   = survivorCount > 0 and survivorCount <= 2 and 200 or 100
+            actor.Config.MaxHealth          = targetHealth
+            humanoid.MaxHealth              = targetHealth
+            humanoid.Health                 = targetHealth
+            actor.Config.SprintConfig.Stamina    = 150
+            actor.Config.SprintConfig.MaxStamina = 150
+        elseif actor.ActorType == "Killer" then
+            humanoid.MaxHealth              *= 0.7
+            humanoid.Health                 *= 0.7
+            actor.Config.Damage              = (actor.Config.Damage or 1) * 0.75
+            actor.Config.SprintConfig.MaxStamina =
+                (actor.Config.SprintConfig.MaxStamina
+                    or actor.Config.SprintConfig.Stamina or 100) * 0.8
+        end
+    end
+    ```
+
+    **Reward scaling:** Killer rewards are halved (`× 0.5` on both Cash and CharacterPoints) via `Mode:AdjustRoundReward`, reflecting the reduced individual pressure each killer faces.
+
+    **Passive survivor healing:** While the round is active the `StartRound` loop heals each survivor to 95 % of current health every second, softening the disadvantage of fighting two killers.
+  </Tab>
+
+  <Tab title="One Bounce">
+    One Bounce is a 9-player mode with eight killers and a single supercharged survivor. Bloodlust is disabled so the survivor is never automatically picked based on queue position.
+
+    | Property | Value |
+    |---|---|
+    | `Mode.Name` | `"OneBounce"` |
+    | `Mode.Weight` | `0` |
+    | `Mode.KillerCount` | `8` |
+    | `Mode.SurvivorCount` | `1` |
+    | `Mode.MinPlayers` | `9` |
+    | `Mode.RoundTime` | `180` seconds |
+    | `Mode.DisableBloodlust` | `true` |
+    | `Mode.UseSharedKiller` | `true` |
+
+    **ApplyActorModifiers** stat overrides:
+
+    | Stat | Survivor | Killer |
+    |---|---|---|
+    | `MaxHealth` | 1 800 | — |
+    | `Stamina / MaxStamina` | 200 | 150 |
+    | `Config.Damage` | — | × 4 |
+
+    ```lua
+    function Mode:ApplyActorModifiers(actor, player)
+        local character = player.Character
+        local humanoid  = character and character:FindFirstChildOfClass("Humanoid")
+        if not humanoid then return end
+
+        actor.Config.SprintConfig = actor.Config.SprintConfig or {}
+        if actor.ActorType == "Survivor" then
+            actor.Config.MaxHealth               = 1800
+            humanoid.MaxHealth                   = 1800
+            humanoid.Health                      = 1800
+            actor.Config.SprintConfig.Stamina    = 200
+            actor.Config.SprintConfig.MaxStamina = 200
+        elseif actor.ActorType == "Killer" then
+            actor.Config.Damage                  = (actor.Config.Damage or 1) * 4
+            actor.Config.SprintConfig.Stamina    = 150
+            actor.Config.SprintConfig.MaxStamina = 150
+        end
+    end
+    ```
+
+    **Survivor goal:** Stand alone against eight killers with boosted health and stamina.
+
+    **Killer goal:** Hunt down the lone survivor together.
+  </Tab>
+
+  <Tab title="Powerhouse">
+    Powerhouse dramatically inflates every actor's health and stamina pool, creating extended marathon engagements. Bloodlust is disabled to prevent automatic killer selection bias.
+
+    | Property | Value |
+    |---|---|
+    | `Mode.Name` | `"Powerhouse"` |
+    | `Mode.DisplayName` | `"Powerhouse"` |
+    | `Mode.MinPlayers` | `2` |
+    | `Mode.RoundTime` | `380` seconds |
+    | `Mode.Weight` | `0` |
+    | `Mode.DisableBloodlust` | `true` |
+
+    **ApplyActorModifiers** applies to **all** actors regardless of role:
+
+    | Stat | Value |
+    |---|---|
+    | `MaxHealth` | 50 000 |
+    | `Stamina` | 300 |
+    | `MaxStamina` | 300 |
+
+    ```lua
+    function Mode:ApplyActorModifiers(actor, player)
+        local character = player.Character
+        local humanoid  = character and character:FindFirstChildOfClass("Humanoid")
+        if not humanoid then return end
+
+        actor.Config.MaxHealth               = 50000
+        humanoid.MaxHealth                   = 50000
+        humanoid.Health                      = 50000
+
+        actor.Config.SprintConfig            = actor.Config.SprintConfig or {}
+        actor.Config.SprintConfig.Stamina    = 300
+        actor.Config.SprintConfig.MaxStamina = 300
+    end
+    ```
+
+    **Survivor goal:** Everyone is heavily boosted — outlast the killer or finish the objectives.
+
+    **Killer goal:** Hunt down the survivors before the extended timer expires.
+  </Tab>
+</Tabs>
+
+---
+
+## ApplyActorModifiers Contract
+
+`ApplyActorModifiers` is called by the ActorService after each character model has been created but before the player has full control. Its signature is:
+
+```lua
+function Mode:ApplyActorModifiers(actor, player, spawnData)
+```
+
+| Parameter | Type | Description |
+|---|---|---|
+| `actor` | `table` | The actor object; holds `ActorType`, `ActorName`, `Config`, and `Character` references |
+| `player` | `Player` | The Roblox Player instance owning this actor |
+| `spawnData` | `table` | Spawn metadata, including `RoundSurvivorCount` for scaling logic |
+
+Modifications should be applied **in-place** directly to `actor.Config` and `humanoid` properties. Both must be kept in sync — setting `actor.Config.MaxHealth` without also updating `humanoid.MaxHealth` will cause the displayed health bar to mismatch the configuration used by the damage pipeline.
+
+<Warning>
+Never yield inside `ApplyActorModifiers`. The method is called synchronously during actor setup, and any `task.wait` or remote call will stall the entire actor initialization sequence.
+</Warning>

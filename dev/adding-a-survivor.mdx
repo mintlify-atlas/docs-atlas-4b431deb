@@ -1,0 +1,424 @@
+---
+title: "Adding a New Survivor to Shattered Reality"
+sidebarTitle: "New Survivor"
+description: "Step-by-step guide to creating a Survivor character with active abilities, passive configs, voicelines, and DataService registration for Shattered Reality."
+---
+
+Survivors follow the same folder convention as Killers, but their Config modules omit the `ChaseConfig` block and use survivor-specific ability types. Each Survivor lives under `ReplicatedStorage/Characters/Survivors/` and is automatically discovered by the character catalog at runtime — no manual registration in a central list is required beyond adding the character to DataService's purchased and visible tables.
+
+<Note>
+  The `!Vintage` survivor uses the flat-file layout (`Config.luau` / `Manager.luau` at the folder root). The `!` prefix is a Studio sort trick and has no effect at runtime. For new characters, the subfolder style used by **Brickbattler** (`Config/init.luau`, `Manager/init.luau`) is recommended because it lets you co-locate VFX instances and helper modules inside the Config or Manager folders.
+</Note>
+
+## Folder structure
+
+```
+YourSurvivorName/
+├── Config/
+│   └── init.luau         ← character config (stats, abilities, animations)
+├── Manager/
+│   ├── init.luau         ← round-start behaviour, tool attachment
+│   └── Voicelines.luau   ← optional voiceline definitions
+└── Abilities/
+    ├── Ability1Name/
+    │   ├── Server.luau
+    │   └── Client.luau
+    └── Ability2Name/
+        ├── Server.luau
+        └── Client.luau
+```
+
+---
+
+<Steps>
+
+### Create the folder structure in Studio
+
+Inside `ReplicatedStorage > Characters > Survivors`, add a **Folder** named after your survivor. Mirror the layout above:
+
+- `Config` folder → `init` **ModuleScript**
+- `Manager` folder → `init` **ModuleScript** (and optionally `Voicelines` **ModuleScript**)
+- `Abilities` folder → one child folder per ability, each with `Server` and `Client` **ModuleScript** instances
+
+Any assets (rocket models, VFX particles, tool rigs) that Config references via `script.SomePart` should be parented directly to the `Config` folder.
+
+### Author `Config/init.luau`
+
+The survivor Config is structurally identical to a killer Config minus `ChaseConfig`. Use the Brickbattler config as your starting template:
+
+```lua
+local function asset(id)
+    return "rbxassetid://" .. tostring(id)
+end
+
+return {
+    Info = {
+        DisplayName = "Your Survivor",
+        Description = "Short tagline shown in the character select screen.",
+    },
+    Class     = "Sentinel",  -- e.g. "Sentinel", "Skirmisher", etc.
+    Price     = 0,
+    NormalRender      = "",
+    TransparentRender = "",
+    MaxHealth = 100,
+
+    StaminaDisplay = {
+        Colors = {
+            Start  = Color3.fromRGB(255, 78, 78),
+            Middle = Color3.fromRGB(173, 93, 255),
+            Finish = Color3.fromRGB(72, 150, 255),
+        },
+    },
+
+    SprintConfig = {
+        Stamina     = 100,
+        MaxStamina  = 100,
+        WalkSpeed   = 11.5,
+        SprintSpeed = 25,
+        SprintLoss  = 12,
+        SprintGain  = 24.5,
+    },
+
+    -- Optional: passive abilities that are always active.
+    -- PassiveInfo = {
+    --     MyPassive = {
+    --         Name        = "Passive Name",
+    --         Description = "What the passive does.",
+    --         -- ability-specific fields…
+    --     },
+    -- },
+
+    AbilityInfo = {
+        -- "Ability1" through "Ability5" are the supported active-ability types.
+        -- There is no "AbilityM1" for survivors.
+        PiercingDash = {
+            Name                  = "Piercing Dash",
+            Cooldown              = 30,
+            LayoutOrder           = 3,
+            Type                  = "Ability1",
+            Icon                  = asset(0),
+            PiercingDashDamage    = 15,
+            PiercingDashStunTime  = 1.2,
+            HitboxSize            = Vector3.new(3.5, 4.2, 5.5),
+            ForceSpeed            = 50,
+            MissSlowLevel         = 2,
+            MissSlowDuration      = 1.2,
+            RocketCooldown        = 11,
+        },
+        YourAbility2 = {
+            Name        = "Second Ability",
+            Cooldown    = 40,
+            LayoutOrder = 2,
+            Type        = "Ability2",
+            Icon        = asset(0),
+            -- ability-specific fields…
+        },
+    },
+
+    Sounds = {
+        Ability1SFX = asset(0),
+        Ability2SFX = asset(0),
+    },
+
+    Animations = {
+        Idle = asset(0),
+        Attacks = {
+            Ability1Name = asset(0),
+            Ability2Name = asset(0),
+        },
+    },
+    AnimationLooping = {
+        Idle = true,
+        Attacks = {
+            Ability1Name = false,
+            Ability2Name = false,
+        },
+    },
+}
+```
+
+<Accordion title="Ability type strings">
+  Survivors do **not** have an `AbilityM1` slot. The supported `Type` values for survivor abilities are:
+
+  | Type | UI slot |
+  |------|---------|
+  | `"Ability1"` | First active ability |
+  | `"Ability2"` | Second active ability |
+  | `"Ability3"` | Third active ability |
+  | `"Ability4"` | Fourth active ability |
+  | `"Ability5"` | Fifth active ability (charge-based, e.g. Deadshot) |
+
+  `LayoutOrder` controls the horizontal order of ability icons in the HUD; lower values appear further left.
+</Accordion>
+
+### Create `Manager/init.luau`
+
+The Manager declares the `Abilities` array and implements any round-start setup (tool attachment, stance initialization, default attribute writes, etc.).
+
+```lua
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService        = game:GetService("RunService")
+
+local Abilities = script.Parent:WaitForChild("Abilities")
+
+local Behavior = {}
+
+-- Ordered list: index 1 = Ability1 slot, index 2 = Ability2 slot, etc.
+Behavior.Abilities = {
+    Abilities.Ability1Name,
+    Abilities.Ability2Name,
+}
+
+-- Optional per-actor default state.
+Behavior.ActorDefaults = {
+    -- MyStateKey = false,
+}
+
+function Behavior:Init(character, actor)
+    if RunService:IsServer() then
+        -- Server-only setup: attach tools, set attributes, bind signals.
+    end
+end
+
+function Behavior:OnRemove(character, actor)
+    -- Cleanup when the character is removed from the round.
+end
+
+return Behavior
+```
+
+### Create ability scripts (`Server.luau` and `Client.luau`)
+
+The server/client split for survivors is identical to killers. The server script is authoritative for hit detection and status effects; the client script drives local VFX, camera effects, and sprint-lock.
+
+**Server pattern** (based on the real PiercingDash server script):
+
+```lua
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local AbilityManager = require(ReplicatedStorage.Modules.Main.Managers.AbilityManager)
+local Hitbox         = require(ReplicatedStorage.Modules.Shared.Gameplay.Hitboxes)
+local StatusEffects  = require(game.ServerScriptService.Modules.Services.StatusEffectsService)
+local Util           = require(ReplicatedStorage.Modules.Shared.Core.Util)
+local ActorService   = require(game.ServerScriptService.Modules.Services.ActorService)
+
+local MyAbility = { Name = "MyAbility" }
+
+function MyAbility:Init(Character, Actor)
+    if Character:GetAttribute("Stunned") then return end
+
+    local cancelCtx = AbilityManager.Abilities.Start(Character, "MyAbility")
+    local config    = Actor.Config.AbilityInfo.MyAbility
+
+    AbilityManager.Abilities:GiveCooldown(Actor, "MyAbility", config.Cooldown, Actor.Player)
+
+    local hasHit = false
+
+    local newHitbox = Hitbox.new({
+        Owner    = Character,
+        Blacklist = { Character },
+        Part     = Character.HumanoidRootPart,
+        Offset   = CFrame.new(0, 0, -3),
+        Size     = config.HitboxSize,
+        Amount   = 20,
+        Delay    = 0.01,
+        Lifetime = 1.1,
+        HitType  = "StopOnHit",
+        Damage   = config.Damage,
+        CanClash = true,
+    })
+
+    newHitbox.HumanoidTouched:Connect(function(humanoid, hitCharacter)
+        if hasHit then return end
+
+        local targetActor = ActorService:GetActorFromCharacter(hitCharacter)
+        -- Only hit killers (or check friendly fire flag)
+        if not targetActor or targetActor.ActorType ~= "Killer" then return end
+
+        hasHit = true
+        Util:ConfirmHit(hitCharacter)
+
+        StatusEffects:GiveStatus(hitCharacter, {
+            Name  = "Stunned",
+            Time  = config.StunTime or 1.2,
+            Level = 1,
+        })
+
+        local targetPlayer = game.Players:GetPlayerFromCharacter(hitCharacter)
+        if targetPlayer then
+            ActorService:CancelAbilities(targetPlayer, "stun")
+        end
+    end)
+
+    cancelCtx:OnCancel(function()
+        newHitbox:DestroyAll()
+    end)
+
+    task.delay(0.62, function()
+        if cancelCtx.Cancelled then return end
+        newHitbox:CreateHitbox()
+    end)
+end
+
+return MyAbility
+```
+
+**Client pattern** (based on the real PiercingDash client script):
+
+```lua
+local Players            = game:GetService("Players")
+local TweenService       = game:GetService("TweenService")
+local Lighting           = game:GetService("Lighting")
+local MultiplierManager  = require(game.ReplicatedStorage.Modules.Main.Managers.MultiplierManager)
+local SprintManager      = require(game.ReplicatedStorage.Modules.Main.Managers.SprintManager)
+
+local Player = Players.LocalPlayer
+local MyAbilityClient = {}
+local active_cleanup_by_character = {}
+
+function MyAbilityClient:Init(Character, Actor)
+    -- Client script runs on ALL clients — guard carefully.
+    if Character ~= Player.Character then return end
+
+    local old = active_cleanup_by_character[Character]
+    if old then old() end
+
+    local cleaned = false
+    local function cleanup()
+        if cleaned then return end
+        cleaned = true
+        active_cleanup_by_character[Character] = nil
+        -- Restore FOV, remove blur, re-enable sprinting, etc.
+        MultiplierManager:DeleteMultiplier("Speed", "MyAbilityMultiplier")
+        SprintManager.IsSprinting = false
+    end
+
+    active_cleanup_by_character[Character] = cleanup
+
+    -- Apply local VFX: FOV zoom, screen blur, camera shake, etc.
+    MultiplierManager:CreateMultiplier("Speed", "MyAbilityMultiplier", 0.2, 0.63)
+
+    task.delay(1.73, function()
+        if not cleaned then cleanup() end
+    end)
+end
+
+return MyAbilityClient
+```
+
+<Warning>
+  The client ability script runs on **every** client in the session, not just the local player. Always guard entry with `if Character ~= Player.Character then return end` to prevent the script from accidentally affecting spectators or other players' views. Never read or write game state in the client script that could affect server-side logic.
+</Warning>
+
+### (Optional) Add passive abilities
+
+If your survivor has a permanent passive effect, add a `PassiveInfo` table to Config. The PassiveInfo keys are arbitrary strings; the ability manager does not call `Init` on passives — you handle them manually in `Manager/init.luau` using `Behavior:Init`.
+
+```lua
+-- Inside Config/init.luau
+PassiveInfo = {
+    Resilience = {
+        Name        = "Resilience",
+        Description = "Reduces stun duration by 20%.",
+        StunReduction = 0.2,
+    },
+},
+```
+
+Then inside your Manager:
+
+```lua
+function Behavior:Init(character, actor)
+    if RunService:IsServer() then
+        local passive = actor.Config.PassiveInfo and actor.Config.PassiveInfo.Resilience
+        if passive then
+            character:SetAttribute("StunResistance", passive.StunReduction)
+        end
+    end
+end
+```
+
+### Register in DataService
+
+Open `ServerScriptService/Modules/Services/DataService.luau` and add your survivor's folder name to the two tables at the top of the file, then update `Template.PurchasedSurvivors` so existing accounts receive the character automatically:
+
+```lua
+local DEFAULT_ACTORS = {
+    Killers   = { "JohnDoe" },
+    Survivors = { "Brickbattler", "Vintage", "YourSurvivorName" },
+}
+local DEFAULT_VISIBLE = {
+    Killers   = { JohnDoe = true },
+    Survivors = { Brickbattler = true, Vintage = true, YourSurvivorName = true },
+}
+```
+
+```lua
+-- Inside DataService.Template:
+PurchasedSurvivors = { "Brickbattler", "Vintage", "YourSurvivorName" },
+```
+
+</Steps>
+
+---
+
+## Using Kane as a reference for complex state machines
+
+<Tip>
+  **Kane** is the best reference survivor for implementing multi-stance or multi-weapon characters. His Config declares a `Stances` table (`Agile` and `Aggressive`) that each contain their own `SprintConfig` overrides. His Manager then listens to the `KaneStance` attribute and hot-swaps sprint speeds, animation presets, and tool visibility at runtime — without reloading the character. If your survivor needs conditional movement states (e.g. sword mode vs. gun mode), study `Survivors/Kane/Manager.luau` for the `applyStanceSprintConfig` and `applyStanceAnimations` pattern.
+</Tip>
+
+Kane's Config structure for stance-dependent sprint speeds:
+
+```lua
+Stances = {
+    Agile = {
+        SprintConfig = {
+            Stamina     = 100,
+            MaxStamina  = 90,
+            WalkSpeed   = 12.5,
+            SprintSpeed = 26,
+            SprintLoss  = 14,
+            SprintGain  = 20,
+        },
+    },
+    Aggressive = {
+        SprintConfig = {
+            Stamina     = 100,
+            MaxStamina  = 115,
+            WalkSpeed   = 10,
+            SprintSpeed = 23,
+            SprintLoss  = 11,
+            SprintGain  = 25,
+        },
+    },
+},
+```
+
+---
+
+## Adding voicelines
+
+Place a `Voicelines.luau` module inside the `Manager/` folder. The module should return a table of preset and line-ID mappings. Brickbattler's PiercingDash Server script demonstrates how voicelines are triggered at ability use time:
+
+```lua
+-- Manager/Voicelines.luau (example structure)
+return {
+    Preset = "YourSurvivor-Default",
+    Sets = {
+        ability_use  = { "line_id_1", "line_id_2", "line_id_3" },
+        on_hit       = { "hit_line_1", "hit_line_2" },
+        on_death     = { "death_line_1" },
+    },
+}
+```
+
+Inside your ability Server script, require the DialogueService to play a line near the character:
+
+```lua
+local DialogueService = require(game.ServerScriptService.Modules.Services.DialogueService)
+
+-- Pick a random line from the set and play it spatially.
+DialogueService:PlayNear(Character, 50, "YourSurvivor-Default", "ability_use_line_id")
+```
+
+The second argument (`50`) is the studs radius in which nearby players will hear the dialogue.

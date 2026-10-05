@@ -1,0 +1,220 @@
+---
+title: "DataService: Player Data Persistence with ProfileStore"
+sidebarTitle: "DataService"
+description: "DataService wraps ProfileStore to persist per-player characters, skins, currency, keybinds, and 30+ validated settings with automatic save/load on join and leave."
+---
+
+DataService is the single source of truth for all persistent player data in Shattered Reality. It wraps the community `ProfileStore` library to handle session management, reconciliation, and safe shutdown saves. On every player join the profile is loaded, normalized, and applied to the player's attributes so downstream systems can read settings from `player:GetAttribute("Setting_*")` without touching the data store directly.
+
+## Architecture
+
+```
+PlayerAdded
+  └─ ProfileStore:StartSessionAsync(userId)
+       └─ profile:Reconcile()         -- fills missing keys with Template defaults
+       └─ normalizeProfileData()      -- inventory cleanup, visibility filter, emote migration
+       └─ applySettingsAttributes()   -- writes Setting_* attributes onto the Player instance
+
+PlayerRemoving
+  └─ profile:EndSession()            -- triggers auto-save
+```
+
+A `Maid` instance cleans up both the `PlayerAdded` and `PlayerRemoving` connections if the service is ever torn down during testing.
+
+<Note>
+The Maid pattern collects RBXScriptConnections and threads with `maid:Give(connection)`. When `maid:Destroy()` is called all collected items are disconnected or cancelled in one pass. This prevents memory leaks when hot-reloading services in Studio.
+</Note>
+
+## Data Template
+
+Every new player profile starts from this template:
+
+```lua
+DataService.Template = {
+    Fragments                  = 0,
+    Bloodlust                  = 1,
+    KillerChance               = 0,
+    ConsecutiveKillerRounds    = 0,
+    HitIndicator = {
+        Scale       = 1,
+        Color       = {1, 1, 1},
+        StrokeColor = {0.15, 0.15, 0.15},
+    },
+    DevSettings = {
+        DevMode   = false,
+        ShowHitbox = false,
+    },
+    Settings                   = {},
+    PurchasedKillers           = {"JohnDoe", "c00lkidd"},
+    PurchasedSurvivors         = {"Brickbattler", "Vintage"},
+    EquippedEmotes             = { [1] = {"IMissTheQuiet","JevilDance","Static","WithFriends","Aura"}, [2] = {} },
+    EquippedKiller             = "JohnDoe",
+    EquippedSurvivor           = "Brickbattler",
+    SelectedSkins              = { Killers = {}, Survivors = {} },
+    CharacterAccessOverrides   = { Killers = {}, Survivors = {} },
+    SuppressAutoInventoryGrants = false,
+}
+```
+
+### Key Fields
+
+<CardGroup cols={2}>
+  <Card title="Fragments" icon="coins">
+    In-game currency. Displayed on the leaderboard via `leaderstats.Fragments`. Use the `GivePlayerMoney` admin command during testing instead of modifying the profile directly.
+  </Card>
+  <Card title="Bloodlust (Malice)" icon="droplet">
+    Starts at `1`. Setting `DisableBeingKiller = true` writes `-1` to the leaderboard value, opting the player out of the killer queue. The `SetPlayerMalice` command sets this directly.
+  </Card>
+  <Card title="KillerChance" icon="dice">
+    Accumulated probability weight toward being selected as killer next round.
+  </Card>
+  <Card title="ConsecutiveKillerRounds" icon="repeat">
+    Tracks back-to-back killer assignments for fairness balancing.
+  </Card>
+</CardGroup>
+
+## Default Actors
+
+```lua
+local DEFAULT_ACTORS = {
+    Killers   = {"JohnDoe"},
+    Survivors = {"Brickbattler", "Vintage"},
+}
+local DEFAULT_VISIBLE = {
+    Killers   = {JohnDoe = true},
+    Survivors = {Brickbattler = true, Vintage = true},
+}
+```
+
+On every profile load `normalizeProfileData` guarantees that `JohnDoe` is in `PurchasedKillers` and both `Brickbattler` and `Vintage` are in `PurchasedSurvivors`. Characters not present in `DEFAULT_VISIBLE` require a `CharacterAccessOverrides` entry to remain in the player's inventory — otherwise they are filtered out to protect unreleased content from slipping through.
+
+## Settings
+
+All settings are validated server-side against three allowlists before being stored. Clients cannot write arbitrary keys or out-of-range numbers.
+
+### Boolean Settings
+
+The following flags are stored as `boolean` and written to `player:SetAttribute("Setting_KEY", value)`:
+
+<Accordion title="View all 23 boolean settings">
+| Key | Description |
+|---|---|
+| `AFKMode` | Marks the player as AFK; also sets `Setting_AFKMode` attribute directly |
+| `DisableBeingKiller` | Opts out of killer selection; sets `Bloodlust` leaderboard to `-1` |
+| `CenterStaminaBar` | Centers the stamina HUD element |
+| `LowHpOverlay` | Shows a screen overlay when health is low |
+| `EpilepsyMode` | Reduces screen-flash intensity |
+| `SurvivorDisplay` | Toggles the survivor list panel |
+| `SurvivorDisplayIconsOnly` | Shows only icons in the survivor panel |
+| `SurvivorDisplaySide` | Switches panel to the opposite side of the screen |
+| `DisablePointsCashNotifs` | Hides XP/currency popups |
+| `ShowOwnClientServerHitboxes` | Debug: renders your own hitboxes |
+| `AutoSpectate` | Auto-follows a player after death |
+| `DisableDeathBlackScreen` | Skips the death blackout effect |
+| `ConsolePromptMotion` | Animates console interaction prompts |
+| `ConsolePromptButtonText` | Shows button labels on prompts |
+| `EmoteSyncing` | Synchronises emotes with nearby players |
+| `DisableEmoteSFX` | Mutes emote sound effects |
+| `DisableEmoteVFX` | Hides emote visual effects |
+| `PotatoMode` | Lowers visual quality for performance |
+| `ReduceScreenEffects` | Reduces post-processing screen effects |
+| `HideDamageIndicators` | Hides floating damage numbers |
+| `HideFragments` | Sets `PrivacyHideFragments` attribute; hides fragment count from others |
+| `BrokenRagdolls` | Enables exaggerated ragdoll physics |
+| `NothingIsReal` | Enables a special visual mode |
+</Accordion>
+
+### Number Settings
+
+Stored as `number` and clamped to `[min, max]` before saving:
+
+| Key | Range | Description |
+|---|---|---|
+| `FieldOfView` | 20 – 80 | Camera field of view |
+| `CameraSwayAdjust` | 0 – 8 | Camera sway intensity multiplier |
+| `InventorySwayAdjust` | 0 – 8 | Inventory screen sway multiplier |
+| `ConsoleCameraSensitivity` | 25 – 200 | Gamepad horizontal look sensitivity |
+| `ConsoleVerticalSensitivity` | 25 – 200 | Gamepad vertical look sensitivity |
+| `ConsolePromptScale` | 70 – 130 | Prompt UI size (%) |
+| `MusicVolume` | 0 – 100 | Background music volume |
+| `SfxVolume` | 0 – 100 | Sound-effect volume |
+| `VoicelineVolume` | 0 – 100 | Character voiceline volume |
+
+### String Settings (Keybinds)
+
+Stored as raw strings and written directly to `player:SetAttribute("Setting_KEY", value)`. Both keyboard and gamepad variants exist for each action:
+
+| Keyboard key | Gamepad key |
+|---|---|
+| `SprintKeybindKeyboard` | `SprintKeybindGamepad` |
+| `ShiftLockKeybindKeyboard` | `ShiftLockKeybindGamepad` |
+| `InteractKeybindKeyboard` | `InteractKeybindGamepad` |
+| `EmoteKeybindKeyboard` | `EmoteKeybindGamepad` |
+| `MainAbilityKeybindKeyboard` | `MainAbilityKeybindGamepad` |
+| `Ability1KeybindKeyboard` | `Ability1KeybindGamepad` |
+| `Ability2KeybindKeyboard` | `Ability2KeybindGamepad` |
+| `Ability3KeybindKeyboard` | `Ability3KeybindGamepad` |
+| `Ability4KeybindKeyboard` | `Ability4KeybindGamepad` |
+| `Ability5KeybindKeyboard` | `Ability5KeybindGamepad` |
+
+## Server-Side Validation
+
+`SaveSettings` — the `Delta.Function` handler for client save requests — only writes keys that appear in `BOOLEAN_SETTINGS`, `NUMBER_SETTINGS`, or `STRING_SETTINGS`. Unknown keys in the payload are silently dropped:
+
+```lua
+-- Only keys present in BOOLEAN_SETTINGS are written
+for key in pairs(BOOLEAN_SETTINGS) do
+    if typeof(payload.Settings[key]) == "boolean" then
+        data.Settings[key] = payload.Settings[key]
+    end
+end
+
+-- Number keys are clamped to their registered range
+for key, range in pairs(NUMBER_SETTINGS) do
+    if typeof(payload.Settings[key]) == "number" then
+        data.Settings[key] = math.clamp(payload.Settings[key], range[1], range[2])
+    end
+end
+```
+
+After writing, `applySettingsAttributes` propagates every setting back onto the `Player` instance as `Setting_KEY` attributes so server-side game code never needs to touch the profile store for per-frame reads.
+
+## Public API
+
+<Accordion title="DataService:GetData(player) → Profile?">
+Returns the active `ProfileStore` profile for `player`, or `nil` if it has not loaded yet.
+</Accordion>
+
+<Accordion title="DataService:WaitForData(player, timeout) → Profile?">
+Polls every 50 ms until the profile is available or `timeout` seconds elapse. Defaults to a 5-second timeout.
+
+```lua
+local profile = DataService:WaitForData(player, 10)
+if profile and profile.Data then
+    -- safe to read profile.Data here
+end
+```
+</Accordion>
+
+<Accordion title="DataService:SetCharacterAccessOverride(player, actorType, actorName, enabled)">
+Grants or revokes direct access to a character that isn't in `DEFAULT_VISIBLE`. `actorType` is `"Killers"` or `"Survivors"`.
+
+```lua
+-- Grant a player access to a limited character
+DataService:SetCharacterAccessOverride(player, "Killers", "SpecialKiller", true)
+```
+</Accordion>
+
+## Network Functions
+
+DataService registers three `DeltaNetwork` functions:
+
+| Function | Direction | Description |
+|---|---|---|
+| `GetData` | Server → Client | Returns the player's full `{Data = ...}` table after normalization |
+| `GetSettings` | Server → Client | Returns `profile.Data` (settings slice) |
+| `SaveSettings` | Client → Server | Validates and persists a settings payload; returns `(bool, message)` |
+
+<Tip>
+To give a player currency during development without touching ProfileStore directly, use the `GivePlayerMoney` admin command from the mod panel. It writes to `profile.Data.Fragments`, updates the `leaderstats` value live, and calls `profile:Save()` — so the change is durable and doesn't leave the profile in a dirty state.
+</Tip>

@@ -1,0 +1,299 @@
+---
+title: "Adding a New Map to the Selectable Map Rotation"
+sidebarTitle: "New Map"
+description: "How to create a map Config, define per-map Lighting properties, set up spawn points, and add the map to Shattered Reality's round rotation pool."
+---
+
+Maps in Shattered Reality are stored in `ServerStorage/Assets/Maps/SelectableMaps/`. Each map is a folder containing a `Config.luau` module, a `Lighting/` folder with a `Properties.luau` module, and a `Map` **Model** that holds the actual world geometry. The `RoundUtil/Maps.luau` module scans `SelectableMaps` at round-start, builds a weighted pool, and selects a map — no central registration array is required. Adding a folder to `SelectableMaps` with a valid `Config.luau` and a `Map` child model is all that's needed.
+
+## Folder structure
+
+```
+ServerStorage/Assets/Maps/SelectableMaps/YourMapName/
+├── Config.luau              ← map metadata, weight, and lifecycle hooks
+├── Lighting/
+│   └── Properties.luau      ← per-map Lighting service property overrides
+└── Map                      ← Model containing the actual world geometry
+    ├── Spawns/
+    │   ├── Killers/         ← SpawnLocation parts for the killer
+    │   └── Survivors/       ← SpawnLocation parts for survivors
+    └── Geometry/            ← all map geometry, doors, props, etc.
+```
+
+<Note>
+  When `workspace.Testing` is set to `true`, the game uses a separate set of assets: `ExtraMaps` and `TestLobby`. These bypass the normal `SelectableMaps` weighted pool and are intended for rapid iteration in a private Studio session. When `Testing` is `false` (production), only maps under `SelectableMaps` are eligible for selection.
+</Note>
+
+---
+
+<Steps>
+
+### Build the map in Roblox Studio
+
+Create a **Model** named `Map` and organise your geometry under it. The round system requires two spawn folders at `Map > Spawns`:
+
+- `Spawns/Killers/` — contains one or more **SpawnLocation** or **Part** instances. Each part becomes a possible killer spawn point; the system randomises among them.
+- `Spawns/Survivors/` — contains one or more **SpawnLocation** or **Part** instances used for survivor spawn positions.
+
+Spawn parts are made invisible and non-collidable automatically at round load time, so you can use any BasePart shape and size for placement purposes.
+
+<Warning>
+  If `Spawns/Killers/` or `Spawns/Survivors/` is missing, or contains no BasePart descendants, `RoundUtil/Maps.luau` will print a warning and abort map loading for that round. Always verify both spawn folders are present before publishing.
+</Warning>
+
+### Create `Config.luau`
+
+The Config module must return a table with at least a `Metadata` block. Use the Area51 config as your reference:
+
+```lua
+-- ServerStorage/Assets/Maps/SelectableMaps/YourMapName/Config.luau
+return {
+    -- Required: metadata block consumed by RoundUtil/Maps.luau
+    Metadata = {
+        DisplayName = "Your Map Name",
+        Description = "A short description shown in the round start UI.",
+        Weight      = 1,   -- relative weight in the random pool; 0 = disabled
+    },
+
+    -- Optional: audio overrides for this map.
+    Audio = {
+        ThemeVolume = 0.5,   -- master volume multiplier for background music
+        -- ThemeID    = "rbxassetid://0",   -- override the lobby theme
+        -- LMSThemeID = "rbxassetid://0",   -- last-man-standing theme override
+    },
+
+    -- Optional: map variants (e.g. night/day versions).
+    -- Each variant key maps to a weight; "Normal" is the base map.
+    -- Variants = {
+    --     Normal = 3,
+    --     Night  = 1,
+    -- },
+
+    -- Optional lifecycle hooks called by the round system.
+    Lifecycle = {
+        OnCreated = function(context)
+            -- `context.Map` is the live Map Model in workspace.
+            -- Set up doors, interactive objects, material variants, etc. here.
+            context.destroyed  = false
+            context.connections = {}
+            context.active_tweens = {}
+            context.busy        = {}
+            context.door_states = {}
+        end,
+        OnDestroyed = function(context)
+            -- Clean up connections, tweens, and injected instances.
+            context.destroyed = true
+            for _, connection in ipairs(context.connections) do
+                connection:Disconnect()
+            end
+            for _, tween in pairs(context.active_tweens) do
+                tween:Cancel()
+            end
+        end,
+    },
+}
+```
+
+<Accordion title="How Weight affects map selection">
+  `RoundUtil/Maps.luau` builds a weighted pool from all maps in `SelectableMaps` whose `Config.Metadata.Weight` is greater than zero. A map with `Weight = 2` is twice as likely to be selected as one with `Weight = 1`. Setting `Weight = 0` effectively disables the map from rotation without removing it from the folder.
+
+  The system also prevents the same map from appearing in two consecutive rounds (when there are at least two maps in the pool), regardless of weight.
+</Accordion>
+
+### Add `Lighting/Properties.luau`
+
+Each map can override a set of `Lighting` service properties to establish atmosphere. Create a `Lighting` folder inside your map folder, then add a `Properties` **ModuleScript**. The module must return a plain table — `RoundUtil/Maps.luau` reads it and calls `Util:SetLightingBasedOnData` to apply the values at round start.
+
+The Area51 lighting config is a good minimal example:
+
+```lua
+-- ServerStorage/Assets/Maps/SelectableMaps/YourMapName/Lighting/Properties.luau
+return {
+    Ambient                  = Color3.fromRGB(102, 38, 42),
+    Brightness               = 3,
+    ColorShift_Bottom        = Color3.fromRGB(0, 0, 0),
+    ColorShift_Top           = Color3.fromRGB(0, 0, 0),
+    EnvironmentDiffuseScale  = 1,
+    EnvironmentSpecularScale = 1,
+    OutdoorAmbient           = Color3.fromRGB(120, 16, 1),
+    ShadowSoftness           = 0.2,
+}
+```
+
+All standard `Lighting` properties are supported, including `FogColor`, `FogStart`, `FogEnd`, `ClockTime`, `GlobalShadows`, and `ExposureCompensation`. Any property you omit will be restored from the original Lighting state captured before the round began.
+
+You can also place non-script children (e.g. `Atmosphere`, `BloomEffect`, `ColorCorrectionEffect`) directly inside the `Lighting/` folder. `RoundUtil/Maps.luau` clones any non-ModuleScript children from the Lighting folder into the live `Lighting` service at round load, and removes them when the round ends.
+
+### Place the map model in `SelectableMaps`
+
+Parent your finished `Map` Model into the map folder in `ServerStorage`. The folder structure should now look like:
+
+```
+SelectableMaps/
+└── YourMapName/
+    ├── Config.luau
+    ├── Lighting/
+    │   └── Properties.luau
+    └── Map              ← Model, goes here
+        ├── Spawns/
+        │   ├── Killers/
+        │   └── Survivors/
+        └── Geometry/
+```
+
+`RoundUtil/Maps.luau` discovers maps by iterating `SelectableMaps:GetChildren()` and calling `buildDefinition` on each folder. It requires only that `Config.luau` exists and that a child **Model** named `Map` is present. If the Model is missing, `Maps.luau` will skip the map and print a warning to the output console.
+
+### Test with the `ForceNextMap` admin command
+
+<Tip>
+  Use the **ForceNextMap** command from the moderator panel to force your new map into the next round without waiting for the random selection cycle. Type the map's folder name (or a partial match of the `DisplayName`) as the argument. The command sets `context.forcedNextMapQuery` on the round context, which `Maps.Select` checks before running the weighted random pick. This lets you iterate on spawn placements, lighting, and door logic in seconds rather than sitting through multiple random rounds.
+</Tip>
+
+`RoundUtil/Maps.luau` resolves forced-map queries with case-insensitive partial matching against both the folder name and `Config.Metadata.DisplayName`, so short abbreviations work fine.
+
+</Steps>
+
+---
+
+## How `RoundUtil/Maps.luau` discovers and loads maps
+
+Understanding the full loading pipeline helps when debugging map issues. The key steps are:
+
+<Accordion title="Map discovery and weighted selection">
+
+`Maps.Select` calls `buildWeightedPool`, which iterates every folder in `SelectableMaps`:
+
+```lua
+local function buildWeightedPool(context)
+    local selectableMaps = context.Maps:FindFirstChild("SelectableMaps")
+    local pool = {}
+    for _, mapFolder in ipairs(selectableMaps and selectableMaps:GetChildren() or {}) do
+        local definition = buildDefinition(mapFolder)
+        local weight = tonumber(definition.Config and definition.Config.Weight) or 1
+        if not definition.Template then
+            warn("[RoundUtil] Map is missing a Map template:", mapFolder.Name)
+        elseif weight > 0 then
+            table.insert(pool, { Folder = mapFolder, Definition = definition, Weight = weight })
+        end
+    end
+    return pool
+end
+```
+
+A map is excluded if `Weight <= 0` or if no `Map` Model child exists (`definition.Template` is nil).
+</Accordion>
+
+<Accordion title="Lighting application">
+
+When a map is selected, `applyMapLighting` is called. It first calls `Util:SetLightingBasedOnData` with the values from `Lighting/Properties.luau`, then clones any non-script children from the `Lighting/` folder into `game.Lighting`:
+
+```lua
+local function applyMapLighting(context, definition)
+    captureOriginalLightingProperties(context)
+    clearInjectedLighting(context)
+    clearOriginalLighting(context)
+
+    if definition.LightingProperties then
+        context.Util:SetLightingBasedOnData(definition.LightingProperties)
+    end
+
+    for _, child in ipairs(definition.LightingFolder and definition.LightingFolder:GetChildren() or {}) do
+        if child:IsA("ModuleScript") then continue end
+        local existing = game.Lighting:FindFirstChild(child.Name)
+        if existing then existing:Destroy() end
+        child:Clone().Parent = game.Lighting
+        table.insert(context.APPLIED_LIGHTING_CHILDREN, child.Name)
+    end
+end
+```
+
+When the round ends, all injected lighting children are destroyed and the original `Lighting` properties captured before the round are restored.
+</Accordion>
+
+<Accordion title="Spawn assignment">
+
+`assignSpawnPositions` collects all BasePart descendants from `Spawns/Killers/` and `Spawns/Survivors/`, makes them invisible and non-collidable, shuffles each list, and then distributes positions round-robin to all round participants:
+
+```lua
+local function collectSpawnCFrames(container)
+    local cframes = {}
+    for _, descendant in ipairs(container and container:GetDescendants() or {}) do
+        if descendant:IsA("BasePart") then
+            descendant.Transparency = 1
+            descendant.CanCollide   = false
+            descendant.CanTouch     = false
+            descendant.CanQuery     = false
+            if descendant:IsA("SpawnLocation") then
+                descendant.Enabled = false
+            end
+            table.insert(cframes, descendant.CFrame + Vector3.new(0, descendant.Size.Y * 0.5 + 3, 0))
+        end
+    end
+    return cframes
+end
+```
+
+Each player is teleported to their assigned CFrame plus a 3-stud vertical offset above the top of the spawn part, so there is no need to adjust part heights manually.
+</Accordion>
+
+<Accordion title="Lifecycle hooks">
+
+If `Config.Lifecycle.OnCreated` is a function, it is called immediately after the `Map` Model is cloned into `workspace` with a `lifecycleContext` table that includes `context.Map` (the live Model). This is where Area51 sets up its interactive doors, material cloning, docking-light flickering, and killer-only entrance collision groups. `OnDestroyed` is called when the round ends, giving you the opportunity to disconnect signals and cancel tweens.
+</Accordion>
+
+---
+
+## Area51 `Config.luau` — production reference
+
+The complete Area51 Config demonstrates how lifecycle hooks are used to wire up complex map behaviour at runtime. The hook bodies reference local functions (`setup_named_door`, `setup_automatic_doors`, `setup_docking_lights`, etc.) defined earlier in the file:
+
+```lua
+return {
+    Name     = "Area51",
+    Metadata = {
+        DisplayName = "Area51",
+        Description = "Area 51 Map",
+        Weight      = 1,
+    },
+    Audio = {
+        ThemeVolume = 0.5,
+    },
+    Lifecycle = {
+        OnCreated = function(context)
+            context.destroyed   = false
+            context.connections = {}
+            context.active_tweens = {}
+            context.busy        = {}
+            context.door_states = {}
+            context.named_door_parts       = {}
+            context.named_door_detections  = {}
+            context.named_door_occupants   = {}
+            context.material_clones = clone_materials(context.Map)
+
+            setup_named_door(context, "ContainmentDoor", horizontal_doors.ContainmentDoor)
+            setup_named_door(context, "SecurityDoor",    horizontal_doors.SecurityDoor)
+            setup_linked_exit_pair(context, "MainHallDoor", "BackAreaDoor")
+            setup_automatic_doors(context)
+            setup_docking_lights(context)
+            setup_killer_doors(context)
+            setup_rocket_ignore_debris(context)
+            setup_containment_group(context, "ContainmentThings")
+            setup_containment_group(context, "ContainmentThings2")
+        end,
+        OnDestroyed = function(context)
+            context.destroyed = true
+            for _, connection in ipairs(context.connections) do
+                connection:Disconnect()
+            end
+            for _, tween in pairs(context.active_tweens) do
+                tween:Cancel()
+            end
+            if context.docking_light_sound and context.docking_light_sound.Parent then
+                context.docking_light_sound:Destroy()
+            end
+            restore_killer_doors(context)
+            cleanup_materials(context.material_clones)
+        end,
+    },
+}
+```

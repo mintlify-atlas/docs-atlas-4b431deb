@@ -1,0 +1,47 @@
+---
+title: "Shattered Reality: Asymmetric Horror on Roblox"
+sidebarTitle: "Introduction"
+description: "Shattered Reality is a Luau asymmetric horror game on Roblox. These docs cover the source code, architecture, and systems for contributors and developers."
+---
+
+Shattered Reality is an asymmetric horror game built entirely in Luau on Roblox. One player takes the role of a Killer — chosen from a roster of uniquely-skilled characters — while the remaining players become Survivors working together to outlast them. Every match is shaped by a server-authoritative round system, typed network remotes, and per-character ability pipelines that run across both the server and client.
+
+The codebase is structured around three primary Roblox services: `ReplicatedStorage` holds all shared and client-side modules, `ServerScriptService` owns every server-only service and infrastructure layer, and `StarterPlayerScripts` bootstraps the client framework on each player join. All logic is pure Luau — no external runtimes, no TypeScript transpilation.
+
+<Note>
+  These docs are **source-code documentation** intended for contributors, modders, and developers building on or extending the Shattered Reality codebase. If you are looking for a player guide or gameplay tips, this is not the right place.
+</Note>
+
+## Key Capabilities
+
+The project ships with a focused set of cross-cutting systems that power every match:
+
+- **DeltaNetwork** — a typed remote-event and remote-function layer with built-in rate limiting, middleware support, and compact serialization types (`NumberF16`, `CFrameF24U8`, `Vector3F24`, etc.).
+- **Lag-compensated hitboxes** — a server-side hitbox system with client snapshot rewind (up to `MAX_CLIENT_REWIND = 0.22s`) and configurable sweep steps for accurate hit detection at high latency.
+- **Server-side anticheat** — request validation, ability-request sanitization, payload checks, and policy enforcement running entirely on the server before any gameplay state is mutated.
+- **Four gamemodes** — `Classic`, `DoubleKiller`, `OneBounce`, and `Powerhouse`, each implemented as a self-contained module under `RoundService/Gamemodes/`.
+- **12+ status effects** — including `Bleed`, `Burning`, `Poisoned`, `Stunned`, `Slowness`, `Speed`, `Strength`, `Invisibility`, `Blindness`, `HearingLoss`, `Regeneration`, `Resistance`, `Suppressed`, `Undetectable`, `Weaken`, and killer-specific variants.
+- **ProfileStore data persistence** — player profiles (equipped characters, skins, settings, currency) are stored via ProfileStore with a clean `DataService` API layer.
+
+## Who These Docs Are For
+
+These docs are written for three audiences:
+
+1. **Contributors** adding new killers, survivors, gamemodes, or status effects to the live codebase.
+2. **Modders** forking the project and adapting its systems for a custom game experience.
+3. **Developers** studying the architecture to reuse patterns — DeltaNetwork, the Starter loader, hitbox rewind, or the character config pipeline — in their own Roblox projects.
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Understand the full folder layout, the server/client split, and how every subsystem connects at startup.
+  </Card>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Open the project in Roblox Studio, configure the Testing attribute, and run your first local playtest.
+  </Card>
+  <Card title="Round Lifecycle" icon="rotate" href="/systems/round-lifecycle">
+    Follow a match from intermission through map load, actor spawn, active round, and round-end cleanup.
+  </Card>
+  <Card title="Characters Overview" icon="users" href="/characters/overview">
+    Explore the per-character Config, Manager, and Abilities pattern shared by all Killers and Survivors.
+  </Card>
+</CardGroup>

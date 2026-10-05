@@ -1,0 +1,319 @@
+---
+title: "Bezier Projectiles: Curved Physics-Based Attacks"
+sidebarTitle: "Projectiles"
+description: "How Shattered Reality fires, tracks, and replicates projectiles using BezierProjectile curves, server-authoritative ProjectileService, and client-side ProjectileReplicationManager."
+---
+
+Shattered Reality's projectile system handles everything from John Doe's `Impale` spike that travels in a straight line at 125 studs per second to arcing abilities that follow quadratic Bézier curves. All projectiles are owned and authoritative on the server. Clients receive a creation payload and run a parallel simulation to drive visuals, while hit registration happens exclusively on the server via the existing hitbox pipeline.
+
+## BezierProjectile Module
+
+`Shared/Gameplay/BezierProjectile` is a pure math utility with no state. It provides three core functions used by `ProjectileService` and `ProjectileReplicationManager` alike.
+
+### GetPoint
+
+Samples a position on a quadratic Bézier curve at parameter `alpha ∈ [0, 1]`:
+
+```lua
+function BezierProjectile.GetPoint(startPosition, controlPoint, endPosition, alpha)
+    local t = math.clamp(tonumber(alpha) or 0, 0, 1)
+    local inverse = 1 - t
+    return (inverse * inverse * startPosition)
+        + (2 * inverse * t * controlPoint)
+        + (t * t * endPosition)
+end
+```
+
+### GetTangent
+
+Returns the tangent vector (direction of travel) at `alpha`. Used to orient the projectile so it always faces along the curve:
+
+```lua
+function BezierProjectile.GetTangent(startPosition, controlPoint, endPosition, alpha)
+    local t = math.clamp(tonumber(alpha) or 0, 0, 1)
+    return (2 * (1 - t) * (controlPoint - startPosition))
+        + (2 * t * (endPosition - controlPoint))
+end
+```
+
+### ResolveControlPoint
+
+If no explicit control point is provided, this function derives one from an `ArchHeight` offset above the midpoint of the curve:
+
+```lua
+function BezierProjectile.ResolveControlPoint(startPosition, endPosition, controlPoint, archHeight, upVector)
+    if typeof(controlPoint) == "Vector3" then
+        return controlPoint
+    end
+    local midpoint = startPosition:Lerp(endPosition, 0.5)
+    local resolvedUp = typeof(upVector) == "Vector3" and upVector.Unit or Vector3.yAxis
+    local resolvedArchHeight = tonumber(archHeight) or 0
+    return midpoint + (resolvedUp * resolvedArchHeight * 2)
+end
+```
+
+<Note>
+  The control point sits at twice `ArchHeight` above the midpoint rather than exactly at `ArchHeight`. This is because in a quadratic Bézier, the curve only reaches halfway to the control point at `alpha = 0.5`, so doubling ensures the peak is visually at the intended height.
+</Note>
+
+### GetCFrame
+
+Combines `GetPoint` and `GetTangent` to return a full `CFrame` that both positions and orients the projectile along the curve:
+
+```lua
+function BezierProjectile.GetCFrame(config, alpha, fallbackLook)
+    local position = BezierProjectile.GetPoint(
+        config.StartPosition, config.ControlPoint, config.EndPosition, alpha
+    )
+    if config.Rotate == false then
+        return CFrame.new(position)
+    end
+    local tangent = BezierProjectile.GetTangent(
+        config.StartPosition, config.ControlPoint, config.EndPosition, alpha
+    )
+    local lookVector = tangent.Magnitude > 0.001 and tangent.Unit or getLookVector(fallbackLook)
+    return CFrame.lookAt(position, position + lookVector)
+end
+```
+
+## ProjectileService — Server Authority
+
+`ServerScriptService/Modules/Services/ProjectileService` is the single source of truth for every active projectile in a round. It registers three DeltaNetwork events:
+
+```lua
+local CreateProjectileRemote  = Delta.Event("CreateProjectile",  Delta.Any)
+local DestroyProjectileRemote = Delta.Event("DestroyProjectile", Delta.String)
+local ProjectileEventRemote   = Delta.Event("ProjectileEvent",   Delta.String, Delta.String, Delta.Any)
+```
+
+### ProjectileService:Create(params)
+
+The main entry point. Accepts a parameter table and returns a live `Projectile` object.
+
+<Tabs>
+  <Tab title="Core Fields">
+    <ParamField path="Template" type="Instance">
+      A Roblox model or part to clone as the projectile instance. Either `Template` or `Instance` must be provided.
+    </ParamField>
+    <ParamField path="CFrame / InitialCFrame" type="CFrame" required>
+      The starting CFrame of the projectile.
+    </ParamField>
+    <ParamField path="Speed" type="number">
+      Studs per second. If both `Speed` and a `Bezier` block are present, speed is ignored — the Bézier `Duration` controls travel time.
+    </ParamField>
+    <ParamField path="Lifetime" type="number">
+      Seconds before the projectile auto-destroys with reason `"Expired"`. Defaults to the Bézier `Duration` if using a curve, otherwise 10.
+    </ParamField>
+    <ParamField path="Direction" type="Vector3">
+      Initial look direction. Falls back to `Velocity.Unit`, then `InitialCFrame.LookVector`.
+    </ParamField>
+    <ParamField path="Gravity" type="Vector3 | number">
+      Applied as `velocity += gravity * dt` each frame. A plain number creates downward gravity: `Vector3.new(0, -n, 0)`.
+    </ParamField>
+    <ParamField path="OwnerCharacter" type="Model">
+      The character that fired the projectile. Used to blacklist the owner from its own hitbox.
+    </ParamField>
+    <ParamField path="OwnerPlayer" type="Player">
+      The player associated with the owner. Used to read `ProjectileSpeedOverride` attributes.
+    </ParamField>
+  </Tab>
+  <Tab title="Bézier Fields">
+    <ParamField path="Bezier.StartPosition" type="Vector3" required>
+      World-space start of the curve.
+    </ParamField>
+    <ParamField path="Bezier.EndPosition" type="Vector3" required>
+      World-space end of the curve.
+    </ParamField>
+    <ParamField path="Bezier.ControlPoint" type="Vector3">
+      Explicit control point. If omitted, `ResolveControlPoint` derives one from `ArchHeight`.
+    </ParamField>
+    <ParamField path="Bezier.ArchHeight" type="number">
+      Height in studs of the arc peak above the midpoint. Effective only when `ControlPoint` is nil.
+    </ParamField>
+    <ParamField path="Bezier.Duration" type="number">
+      Travel time in seconds from start to end. Replaces `Lifetime` for Bézier projectiles.
+    </ParamField>
+    <ParamField path="Bezier.Rotate" type="boolean">
+      Whether to orient the instance along the tangent. Defaults to `true`.
+    </ParamField>
+  </Tab>
+  <Tab title="Hitbox Fields">
+    <ParamField path="HitboxFactory" type="(projectile) -> table">
+      A function called after the projectile is created that returns a hitbox config. Receives the live `Projectile` object so the hitbox can reference `projectile.RootPart`.
+    </ParamField>
+    <ParamField path="Hitbox" type="table">
+      Alternative to `HitboxFactory` — a static hitbox config table. Prefer `HitboxFactory` when the hitbox needs to reference the projectile instance.
+    </ParamField>
+  </Tab>
+  <Tab title="Replication Fields">
+    <ParamField path="Replication.Enabled" type="boolean">
+      Set to `true` to replicate this projectile to clients.
+    </ParamField>
+    <ParamField path="Replication.Template" type="Instance">
+      The visual template cloned on clients. Falls back to the server `Template`.
+    </ParamField>
+    <ParamField path="Replication.Definition" type="string">
+      Optional string key into the client's `Definitions` table for custom spawn/destroy visual effects.
+    </ParamField>
+    <ParamField path="Replication.Clients" type="Player | {Player}">
+      Target specific players instead of broadcasting to everyone.
+    </ParamField>
+  </Tab>
+</Tabs>
+
+### Projectile Lifecycle
+
+```
+Create() → Started callback → HitboxFactory → _replicateCreate → registered in Projectiles table
+    ↓  (each Heartbeat)
+_stepProjectile → Bézier/velocity step → Homing turn → OnHeartbeat callback
+    ↓  (on hit or expiry)
+_destroyProjectile → _replicateDestroy → Ended callback → fadeOutAndDestroy
+```
+
+### Homing
+
+Projectiles can track the nearest enemy with `Homing`:
+
+```lua
+local DEFAULT_HOMING_DISTANCE = 220  -- studs
+local DEFAULT_HOMING_TURN_SPEED = 8  -- degrees-ish per second (exponential lerp)
+```
+
+The homing step slerps the current direction toward the closest enemy root part each frame, respecting team boundaries (killers track survivors, survivors track killers).
+
+## ProjectileReplicationManager — Client Visualisation
+
+`Main/Features/Networking/ProjectileReplicationManager` mirrors the `ProjectileService` physics simulation on every client so projectiles appear to move smoothly without waiting for server position updates.
+
+On `Init`, it connects to all three remotes:
+
+```lua
+CreateProjectileRemote.OnClientEvent:Connect(function(payload)
+    self:_createProxy(payload)
+end)
+
+DestroyProjectileRemote.OnClientEvent:Connect(function(id)
+    self:_destroyProxy(id, "RemoteDestroy")
+end)
+
+ProjectileEventRemote.OnClientEvent:Connect(function(id, eventName, payload)
+    -- handles "SnapToImpact" and definition-specific events
+end)
+```
+
+Each client-side proxy runs the exact same Bézier or velocity step logic as the server. Because the `payload` includes `StartedAt` (a server timestamp) and `Elapsed`, the manager fast-forwards the proxy in sub-frame steps to catch up to the projectile's current position before rendering it for the first time:
+
+```lua
+-- _primeProxy
+local elapsed = math.max(tonumber(payload.Elapsed) or 0, 0)
+local startedAt = tonumber(payload.StartedAt)
+if startedAt then
+    elapsed = math.max(elapsed, workspace:GetServerTimeNow() - startedAt)
+end
+```
+
+A `RecentlyDestroyed` table (with a 2-second expiry window) prevents a race where a destroy packet arrives before the create packet.
+
+## Integration with the Hitbox System
+
+Projectile hit detection runs entirely on the server inside `ProjectileService`. The `HitboxFactory` callback constructs a standard `Hitbox.new(config)` parameters table, and the returned hitbox is attached to `projectile.Hitbox`. On a `HumanoidTouched` signal, the `HitHuman` callback fires; on `ObjectTouched`, the `HitOther` callback fires.
+
+Projectiles with `HitType = "StopOnHit"` auto-destroy on the first touch:
+
+```lua
+local function shouldAutoDestroyFromHitbox(projectile)
+    local hitbox = projectile and projectile.Hitbox
+    if not hitbox then return false end
+    return hitbox.HitType == "StopOnHit" and hitbox._destroyed == true
+end
+```
+
+## Real-World Example — John Doe's Impale
+
+Impale fires a straight-line projectile (no Bézier arc) that grows its hitbox as it travels, with falloff damage for multi-target hits.
+
+From `JohnDoe/Config/init.luau`:
+
+```lua
+Impale = {
+    Cooldown           = 18,
+    Damage             = 16,
+    MaxTargets         = 2,
+    DamageFalloffPerExtraHit = 0.25,
+    BleedFalloffPerExtraHit  = 0.35,
+    KnockbackForce     = 18,
+    KnockbackDuration  = 0.18,
+    ProjectileDistance = 60,   -- studs before hitbox is fully grown
+    ProjectileSpeed    = 125,  -- studs per second
+    HitboxSize         = Vector3.new(5.5, 4.25, 5.5),
+    HitboxAmount       = 100,
+    HitboxDelay        = 0.01,
+    HitboxLifetime     = 2,
+    HitboxSpawnDelay   = 1.75,
+    BleedLevel         = 1,
+    BleedDuration      = 3,
+},
+```
+
+The `OnHeartbeat` callback dynamically grows the hitbox from `baseHitboxSize` to `farHitboxSize` (base + `Vector3.new(0.75, 0.35, 0.75)`) as the spike closes in on `ProjectileDistance`:
+
+```lua
+Callbacks = {
+    OnHeartbeat = function(activeProjectile, dt)
+        distanceTravelled += impaleConfig.ProjectileSpeed * dt
+        local growthAlpha = math.clamp(
+            distanceTravelled / impaleConfig.ProjectileDistance, 0, 1
+        )
+        if activeProjectile.Hitbox then
+            activeProjectile.Hitbox.Size = baseHitboxSize:Lerp(farHitboxSize, growthAlpha)
+        end
+    end,
+    -- ...
+}
+```
+
+The spike is created via `ProjectileService:Create` with `PreserveOrientation = true` so it keeps its model orientation independent of velocity direction, and `Replication.Enabled = false` because the spike model is handled on clients via a separate VFX event.
+
+## Real-World Example — Wirefly's Spit
+
+Spit fires a simple unreplicated sphere projectile at the configuration speed, stopping on the first target it touches:
+
+```lua
+Projectiles:Create({
+    Name      = "Spit",
+    Template  = Template,
+    CFrame    = RootPart.CFrame * CFrame.new(0, 0, -3),
+    Direction = RootPart.CFrame.LookVector,
+    Speed     = Config.Speed,
+    Lifetime  = Config.Lifetime,
+    Replication = {
+        Enabled    = true,
+        Template   = Template,
+        Definition = "SpitProjectile",
+    },
+    HitboxFactory = function(projectile)
+        return {
+            Owner    = Character,
+            Blacklist = { Character, projectile.Instance },
+            HitType  = "StopOnHit",
+            HitMode  = "Both",
+            Part     = projectile.RootPart,
+            Size     = Vector3.new(4, 4, 4),
+            Amount   = 0,
+            Delay    = 0,
+            Lifetime = Config.Lifetime,
+        }
+    end,
+    Callbacks = {
+        HitHuman = function(Projectile, Humanoid, HitCharacter)
+            -- triggers AcidExplosion VFX on all clients
+        end,
+        HitOther = function(Projectile, Object)
+            -- same VFX on wall/terrain hit
+        end,
+    },
+})
+```
+
+On hit, the server fires the `FireVFX` event to broadcast an `AcidExplosion` particle effect at the impact CFrame. The `"SpitProjectile"` definition on the client manager enables projectile visuals immediately after creation.

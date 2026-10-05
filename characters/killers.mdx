@@ -1,0 +1,498 @@
+---
+title: "Killer Roster: Abilities, Classes, and Configuration"
+sidebarTitle: "Killers"
+description: "A complete reference for all five Shattered Reality Killers — their ability sets, class archetypes, sprint tuning, and key config values sourced directly from the game."
+---
+
+Killers are the asymmetric threat in every Shattered Reality round. A single Killer faces the entire Survivor team, compensating with a dramatically higher health pool, powerful offensive abilities, and pursuit-focused movement mechanics. Each Killer belongs to a design **Class** that describes their playstyle archetype, and every Killer config is loaded from `ReplicatedStorage/Characters/Killers/<Name>/Config/`.
+
+<Note>
+  All standard Killers share a base `MaxHealth` of **1000**, compared to Survivor health values that range from 95–100. The special `!Pursuer` character is an exception with **3500** health — it is a boss-tier entity used in specific gamemodes rather than the normal player-selected Killer pool. Gamemode scripts may further modify effective health at round start.
+</Note>
+
+## Killer Profiles
+
+<Tabs>
+  <Tab title="John Doe">
+    **Display Name:** John Doe — *The Corrupted Pursuer*
+    **Class:** Rushdown | **MaxHealth:** 1000 | **Price:** 0
+
+    John Doe is the default Killer and the archetype for aggressive pursuit. His **Rushdown** class is built around closing distance quickly and punishing Survivors who stand still. He has a `Connection` to Jane Doe, enabling a unique LMS theme when she is in the same round.
+
+    ### Sprint Configuration
+
+    ```lua
+    SprintConfig = {
+        Stamina     = 115,
+        MaxStamina  = 115,
+        WalkSpeed   = 9.5,
+        SprintSpeed = 30,
+        SprintLoss  = 12.5,
+        SprintGain  = 28,
+    },
+    ```
+
+    ### Abilities
+
+    <Accordion title="Slash (M1) — Cooldown: 1.7s">
+      The basic melee attack. Spawns a forward hitbox after a short wind-up and grants a temporary speed bonus on hit.
+
+      ```lua
+      Slash = {
+          Name    = "Slash",
+          Type    = "AbilityM1",
+          Cooldown = 1.7,
+          Damage  = 16,
+          HitboxOffset = CFrame.new(0, -1, -4),
+          HitboxSize   = Vector3.new(4.5, 6, 5.2),
+          HitboxAmount = 16,
+          HitboxDelay  = 0.011,
+          HitboxLifetime = 0.16,
+          HitboxSpawnDelay = 0.4,
+          HitSpeedBonusMultiplier = 1.45,
+          HitSpeedBonusDuration   = 1.1,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Impale (Ability1) — Cooldown: 18s">
+      Launches a spike projectile that travels 60 studs at 125 studs/s. Can hit up to **2 targets**, with damage and bleed falling off for each additional hit. Applies `BleedLevel = 1` for 3 seconds.
+
+      ```lua
+      Impale = {
+          Name       = "Impale",
+          Type       = "Ability1",
+          Cooldown   = 18,
+          Damage     = 16,
+          MaxTargets = 2,
+          DamageFalloffPerExtraHit = 0.25,
+          BleedFalloffPerExtraHit  = 0.35,
+          ProjectileDistance = 60,
+          ProjectileSpeed    = 125,
+          BleedLevel    = 1,
+          BleedDuration = 3,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Pounce (Ability2) — Cooldown: 16s">
+      A dash-and-grab combo. John Doe charges forward at 80 studs/s for 0.82 s, grabs any Survivor in range, holds them for 0.78 s, then throws them with significant launch force.
+
+      ```lua
+      Pounce = {
+          Name           = "Pounce",
+          Type           = "Ability2",
+          Cooldown       = 16,
+          Damage         = 17,
+          ChargeVelocity = 80,
+          ChargeDuration = 0.82,
+          GrabDuration   = 0.78,
+          ThrowForce         = 54,
+          ThrowUpwardForce   = 16,
+          ThrowRagdollDuration = 1.4,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Corrupted Fury (Ability3) — Cooldown: 15s">
+      A 5-second speed burst that pushes John Doe to **45 studs/s**. Activates after a 0.633 s startup delay and slams the ground when it ends.
+
+      ```lua
+      CorruptedFury = {
+          Name      = "CorruptedFury",
+          Type      = "Ability3",
+          Cooldown  = 15,
+          Duration  = 5,
+          Speed     = 45,
+          Damage    = 15,
+          StartDelay = 0.633,
+          TurnDelay  = 0.32,
+      },
+      ```
+    </Accordion>
+
+    ### Connection
+
+    ```lua
+    Connection = { "JaneDoe" },
+    LMSConnection = {
+        JaneDoe = {
+            ThemeID = "rbxassetid://114037366568111",
+        },
+    },
+    ```
+  </Tab>
+
+  <Tab title="Wirefly">
+    **Display Name:** Wirefly — *The Graceful Firefly*
+    **Class:** Killer | **MaxHealth:** 1000 | **Price:** 0
+
+    Wirefly is a highly mobile aerial Killer. Her `MovementConfig` enables a **glide** mechanic that activates above a minimum height, dramatically changing her traversal profile compared to ground-based Killers.
+
+    ### Sprint Configuration
+
+    ```lua
+    SprintConfig = {
+        Stamina     = 115,
+        MaxStamina  = 115,
+        WalkSpeed   = 9.5,
+        SprintSpeed = 28.5,
+        SprintLoss  = 13,
+        SprintGain  = 25.5,
+    },
+    ```
+
+    ### Glide / Movement Config
+
+    ```lua
+    MovementConfig = {
+        SpeedMultiplier          = 1.06,
+        StaminaLossMultiplier    = 1.25,
+        GlideMinHeight           = 55,
+        GlideFallSpeed           = 4,
+        GlideLandingFallSpeed    = 9,
+        GlideForwardSpeed        = 10.25,
+        GlideLandingCarrySpeed   = 3.5,
+        GlideLandingCarryMinSpeed = 14,
+        GlideSmoothing           = 0.095,
+        AnimationBlendTime       = 0.25,
+    },
+    ```
+
+    Wirefly enters glide mode when she falls from at least `GlideMinHeight` (55) studs. While gliding she falls at only `GlideFallSpeed` (4) studs/s and carries forward momentum through landing.
+
+    ### Abilities
+
+    <Accordion title="M1 — Cooldown: 1.5s">
+      Standard melee attack. Slightly higher damage than John Doe's Slash and a faster hit window with a 1.55× on-hit speed bonus.
+
+      ```lua
+      M1 = {
+          Type     = "AbilityM1",
+          Cooldown = 1.5,
+          Damage   = 22,
+          HitboxSize   = Vector3.new(4.5, 5.5, 5),
+          HitboxAmount = 12,
+          HitboxSpawnDelay = 0.34,
+          Endlag   = 0.70,
+          HitSpeedBonusMultiplier = 1.55,
+          HitSpeedBonusDuration   = 1.25,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Highspeed Assault (Ability1) — Cooldown: 30s">
+      A high-velocity charge at 52.5 studs/s with active steering (`TurnRate = 170.5`). On hit, Wirefly grabs the Survivor for 30 damage and launches them into a wall. Missing slows Wirefly for 1.9 s. Reduces `InfectiousSiphon` cooldown by `SmallInfectiousCooldown` on hit.
+
+      ```lua
+      HighspeedAssault = {
+          Type             = "Ability1",
+          Cooldown         = 30,
+          AssaultVelocity  = 52.5,
+          TurnRate         = 170.5,
+          GrabDamage       = 30,
+          MissSlownessDuration = 1.9,
+          SmallInfectiousCooldown = 9.25,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Insightful Aroma (Ability2) — Cooldown: 35.5s">
+      Wirefly sniffs for 2 s then reveals Survivors in the area for up to 7.5 s. The reveal duration scales with Survivor health (`RevealHealthStart = 85`, `RevealHealthStep = 10`).
+
+      ```lua
+      InsightfulAroma = {
+          Type        = "Ability2",
+          Cooldown    = 35.5,
+          SniffTime   = 2,
+          RevealTime  = 2,
+          MaxRevealTime = 7.5,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Infectious Siphon (Ability3) — Cooldown: 20s">
+      A siphon charge that applies `PoisonLevel = 1` for 3 s and deals 25 grab damage. Transitions into an aerial phase at 70 studs/s on hit.
+
+      ```lua
+      InfectiousSiphon = {
+          Type         = "Ability3",
+          Cooldown     = 20,
+          GrabDamage   = 25,
+          PoisonLevel  = 1,
+          PoisonDuration = 3,
+          AerialVelocity = 70,
+          SmallHighspeedCooldown = 11.5,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Spit (Ability5) — Cooldown: 20s">
+      Launches a projectile at 100 studs/s with a 10 s lifetime. Delayed by a 0.733 s throw animation.
+
+      ```lua
+      Spit = {
+          Type       = "Ability5",
+          Cooldown   = 20,
+          ThrowDelay = 0.733,
+          Lifetime   = 10,
+          Speed      = 100,
+      },
+      ```
+    </Accordion>
+  </Tab>
+
+  <Tab title="The Clown">
+    **Display Name:** The Clown — *The Chaotic Performer*
+    **Class:** Strategic | **MaxHealth:** 1000 | **Price:** 0
+
+    The Clown is a zone-control Killer. His **Strategic** class revolves around placing environmental hazards and recalling objects to punish Survivors who try to escape rather than fight.
+
+    ### Sprint Configuration
+
+    ```lua
+    SprintConfig = {
+        Stamina     = 115,
+        MaxStamina  = 115,
+        WalkSpeed   = 9.5,
+        SprintSpeed = 28.5,
+        SprintLoss  = 13,
+        SprintGain  = 25.5,
+    },
+    ```
+
+    ### Abilities
+
+    <Accordion title="Swing (M1) — Cooldown: 2.15s">
+      Slower than most Killer M1s but deals 26 damage — among the highest base M1 damage in the roster.
+
+      ```lua
+      Swing = {
+          Type     = "AbilityM1",
+          Cooldown = 2.15,
+          Damage   = 26,
+          HitboxSize   = Vector3.new(3.5, 6, 5),
+          HitboxAmount = 16,
+          HitboxSpawnDelay = 0.4,
+          HitSpeedBonusMultiplier = 1.5,
+          HitSpeedBonusDuration   = 1.15,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Improbable Outbreak (Ability1) — Cooldown: 6s">
+      Throws a bouncing rock projectile at 37.5 studs/s with a 6 s duration. Rocks bounce back with `BounceBackVelocity = 50` on wall contact. Short `SmallCooldown = 2` for rapid repeated use.
+
+      ```lua
+      ImprobableOutbreak = {
+          Type              = "Ability1",
+          Cooldown          = 6,
+          SmallCooldown     = 2,
+          RockVelocity      = 37.5,
+          BounceBackVelocity = 50,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Tactical Recall (Ability2) — Cooldown: 25s / 20s on hit">
+      Hurls a sign at 110 studs/s then reels it back, dealing `KickDamage = 35` if it catches a Survivor on the return. The cooldown is reduced to 20 s when the return pass hits a Survivor.
+
+      ```lua
+      TacticalRecall = {
+          Type                 = "Ability2",
+          DefaultCooldown      = 25,
+          SurvivorHitCooldown  = 20,
+          SignSpeed            = 110,
+          KickDamage           = 35,
+          ReelTime             = 1,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Skewers Of Hell (Ability3) — Cooldown: 8s">
+      Erupts a trail of ground spikes. Spawns up to 15 spikes at `SpawnTickPerSecond = 0.08`, each dealing `SpikeDamage = 12` with a brief hit window.
+
+      ```lua
+      SkewersOfHell = {
+          Type                = "Ability3",
+          Cooldown            = 8,
+          MaxSpikesSpawnable  = 15,
+          SpawnTickPerSecond  = 0.08,
+          SpikeDamage         = 12,
+          SpikeHitboxSize     = Vector3.new(4, 14, 4),
+          SpikeHitboxLifetime = 0.35,
+      },
+      ```
+    </Accordion>
+  </Tab>
+
+  <Tab title="c00lkidd">
+    **Display Name:** c00lkidd — *The Digital Menace*
+    **Class:** Zoner | **MaxHealth:** 1000 | **Price:** 0
+
+    c00lkidd is a minion-summoning Zoner Killer. His **Recreation** ability spawns autonomous minion units (Brick, Superball, Subspace, and Hyperlaser) that harass Survivors independently.
+
+    ### Sprint Configuration
+
+    ```lua
+    SprintConfig = {
+        Stamina     = 115,
+        MaxStamina  = 115,
+        WalkSpeed   = 9.5,
+        SprintSpeed = 29.8,
+        SprintLoss  = 13,
+        SprintGain  = 20.5,
+    },
+    ```
+
+    <Note>
+      c00lkidd has the highest sprint speed (29.8) of the baseline stat Killers, but the lowest stamina regeneration (`SprintGain = 20.5`). Managing stamina carefully is important when chasing multiple Survivors.
+    </Note>
+
+    ### Abilities
+
+    <Accordion title="Punch (M1) — Cooldown: 1.7s">
+      A solid basic attack dealing 23 damage with a slightly wider hitbox than John Doe's Slash.
+
+      ```lua
+      Punch = {
+          Type     = "AbilityM1",
+          Cooldown = 1.7,
+          Damage   = 23,
+          HitboxSize   = Vector3.new(4.75, 6, 5),
+          HitboxAmount = 16,
+          HitboxSpawnDelay = 0.4,
+          HitSpeedBonusMultiplier = 1.5,
+          HitSpeedBonusDuration   = 1.2,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Connection Failed (Ability1) — Cooldown: 30s">
+      Fires a projectile at 95 studs/s with a `BlastRadius = 8` explosion on impact, dealing 15 blast damage.
+
+      ```lua
+      ConnectionFailed = {
+          Type           = "Ability1",
+          Cooldown       = 30,
+          Lifetime       = 2,
+          ProjectileSpeed = 95,
+          BlastDamage    = 15,
+          BlastRadius    = 8,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Recreation (Ability2) — Charge-based: 1 charge / 30s regen">
+      Summons a random minion. c00lkidd has four minion sub-types defined in `Assets`:
+
+      | Minion | Notes |
+      |---|---|
+      | **Brick** | Throws bricks at nearby Survivors |
+      | **Superball** | Bounces a large ball with `Regain` animation |
+      | **Subspace** | Charges up and fires a sustained beam |
+      | **Hyperlaser** | Snipes with a laser from range |
+
+      ```lua
+      Recreation = {
+          Type           = "Ability2",
+          MaxCharges     = 1,
+          InitialCharges = 1,
+          ChargeRegen    = 30,
+      },
+      ```
+    </Accordion>
+  </Tab>
+
+  <Tab title="Pursuer">
+    **Display Name:** Pursuer — *The Relentless Hunter*
+    **Class:** Chaser | **MaxHealth:** 3500 | **Price:** 0
+
+    The Pursuer (folder name `!Pursuer`) is a special-access boss-tier Killer with **3500 health** and **350 stamina** — far beyond any standard Killer. Its `!` prefix means it does not appear in the normal character selection and must be granted via `CharacterAccessOverride`. All abilities emphasise prolonged, relentless chase.
+
+    ### Sprint Configuration
+
+    ```lua
+    SprintConfig = {
+        Stamina     = 350,
+        MaxStamina  = 350,
+        WalkSpeed   = 10.2,
+        SprintSpeed = 29,
+        SprintLoss  = 13,
+        SprintGain  = 22,
+    },
+    ```
+
+    ### Abilities
+
+    <Accordion title="M1 — Cooldown: 1.7s">
+      Standard melee with 20 damage and a wide hitbox. Deals reliable damage without the risk mechanics of his larger abilities.
+
+      ```lua
+      M1 = {
+          Type     = "AbilityM1",
+          Cooldown = 1.7,
+          Damage   = 20,
+          HitboxSize   = Vector3.new(4.5, 5.5, 5),
+          HitboxAmount = 16,
+          Endlag   = 0.85,
+          HitSpeedBonusMultiplier = 1.55,
+          HitSpeedBonusDuration   = 1.25,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Howl (Ability2) — Cooldown: 20s">
+      Emits a shockwave that travels 75 studs over 0.55 s, applying a slowness effect to all struck Survivors for up to 5 s. Briefly slows the Pursuer himself (`SelfSlownessStuds = 1`) after the windup. On hit, grants a 0.5 s speed boost.
+
+      ```lua
+      Howl = {
+          Type             = "Ability2",
+          Cooldown         = 20,
+          Windup           = 0.7,
+          ShockwaveDistance = 75,
+          ShockwaveDuration = 0.55,
+          MinSlownessStuds = 3,
+          MaxSlownessStuds = 6,
+          SlownessTime     = 5,
+          HighlightDuration = 5,
+          Damage           = 20,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Cleave (Ability3) — Cooldown: 22s">
+      A wide sword swing covering a 6 × 6 × 7 hitbox. Applies `BleedLevel = 1` for 5 s and highlights struck Survivors for 5 s. Sheathing after a hit lets the Pursuer maintain momentum; missing incurs a slowness penalty.
+
+      ```lua
+      Cleave = {
+          Type           = "Ability3",
+          Cooldown       = 22,
+          Damage         = 20,
+          BleedLevel     = 1,
+          BleedTime      = 5,
+          HitboxSize     = Vector3.new(6, 6, 7),
+          SpeedBoostStuds = 5,
+          HitBoostRetention  = 0.4,
+          MissBoostRetention = 0.5,
+          SheatheSlownessStuds = 3,
+          SheatheSlownessTime  = 1.5,
+      },
+      ```
+    </Accordion>
+
+    <Warning>
+      The Pursuer's `MaxHealth = 3500` and `Stamina = 350` are intended for specialised gamemodes. Standard round balancing is designed around the 1000-health Killers. Enabling the Pursuer via `CharacterAccessOverride` in a normal public round will result in a heavily imbalanced match.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Killer Class Summary
+
+| Killer | Class | SprintSpeed | MaxHealth |
+|---|---|---|---|
+| John Doe | Rushdown | 30 | 1000 |
+| Wirefly | Killer | 28.5 | 1000 |
+| The Clown | Strategic | 28.5 | 1000 |
+| c00lkidd | Zoner | 29.8 | 1000 |
+| Pursuer | Chaser | 29 | 3500 |

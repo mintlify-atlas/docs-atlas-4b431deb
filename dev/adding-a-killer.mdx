@@ -1,0 +1,525 @@
+---
+title: "Adding a New Killer to Shattered Reality"
+sidebarTitle: "New Killer"
+description: "Step-by-step guide to creating a new Killer character, covering the Config module, Manager init, and Server/Client ability scripts for Shattered Reality."
+---
+
+Every Killer in Shattered Reality is a self-contained folder under `ReplicatedStorage/Characters/Killers/`. The folder holds a `Config` module that defines stats and ability parameters, a `Manager` module that wires up round-start behaviour and dialogue, and one subfolder per ability containing a `Server.luau` and a `Client.luau` script. Following this convention means the character catalog, the ability manager, and the chase-music system will all pick up your new character automatically.
+
+<Note>
+  The `!Pursuer` killer uses a flat-file layout (`Config.luau` and `Manager.luau` at the folder root rather than `Config/init.luau` and `Manager/init.luau`). The `!` prefix is a Studio sorting trick — it forces the folder to the top of the Explorer list for quick access during development. Both layouts are supported, but the subfolder style used by **JohnDoe** is preferred for new characters because it lets you store VFX assets and helper modules directly inside `Config/`.
+</Note>
+
+## Folder structure
+
+Before writing any code, create the following layout inside `ReplicatedStorage/Characters/Killers/`:
+
+```
+YourKillerName/
+├── Config/
+│   └── init.luau        ← character config (stats, abilities, animations)
+├── Manager/
+│   └── init.luau        ← round-start behaviour / dialogue
+└── Abilities/
+    ├── M1/
+    │   ├── Server.luau
+    │   └── Client.luau
+    └── YourAbilityName/
+        ├── Server.luau
+        └── Client.luau
+```
+
+---
+
+<Steps>
+
+### Create the folder structure in Studio
+
+In the Roblox Studio Explorer, add a **Folder** named after your killer inside `ReplicatedStorage > Characters > Killers`. Inside it create:
+
+- A **Folder** called `Config` containing a **ModuleScript** named `init`
+- A **Folder** called `Manager` containing a **ModuleScript** named `init`
+- A **Folder** called `Abilities` — you will add one child folder per ability, each holding `Server` and `Client` **ModuleScript** instances
+
+Any VFX or UI instances your Config references (via `script.VFX.SomePart`, etc.) can be parented directly to the `Config` folder.
+
+### Author `Config/init.luau`
+
+The Config module is a plain Lua table returned by the module. Every field listed below is required by the ability manager or UI system. Use the JohnDoe config as your starting point:
+
+```lua
+local function asset(id)
+    return "rbxassetid://" .. tostring(id)
+end
+
+return {
+    Info = {
+        DisplayName = "Your Killer",
+        Description = "A short tagline shown in the character select screen.",
+    },
+    Class = "Rushdown",   -- see Class archetypes below
+    Price = 0,            -- fragment cost; 0 = free / default-unlocked
+    NormalRender = "",    -- thumbnail asset ID (leave blank while developing)
+    TransparentRender = "",
+    MaxHealth = 1000,
+
+    StaminaDisplay = {
+        Colors = {
+            Start  = Color3.fromRGB(255, 86, 86),
+            Middle = Color3.fromRGB(183, 39, 39),
+            Finish = Color3.fromRGB(88, 12, 12),
+        },
+    },
+
+    SprintConfig = {
+        Stamina      = 115,   -- starting stamina value
+        MaxStamina   = 115,
+        WalkSpeed    = 9.5,
+        SprintSpeed  = 30,
+        SprintLoss   = 12.5,  -- stamina drained per second while sprinting
+        SprintGain   = 28,    -- stamina recovered per second while not sprinting
+    },
+
+    AbilityInfo = {
+        -- M1 / basic attack — Type must be "AbilityM1"
+        Slash = {
+            Name              = "Slash",
+            Type              = "AbilityM1",
+            Icon              = asset(0),
+            Cooldown          = 1.7,
+            LayoutOrder       = 5,
+            Damage            = 16,
+            HitboxOffset      = CFrame.new(0, -1, -4),
+            HitboxSize        = Vector3.new(4.5, 6, 5.2),
+            HitboxAmount      = 16,
+            HitboxDelay       = 0.011,
+            HitboxLifetime    = 0.16,
+            HitboxSpawnDelay  = 0.4,
+            HitSpeedBonusMultiplier = 1.45,
+            HitSpeedBonusDuration   = 1.1,
+        },
+        -- Secondary ability — Type "Ability1", "Ability2", "Ability3", …
+        YourAbility = {
+            Name         = "Your Ability",
+            Type         = "Ability1",
+            Icon         = asset(0),
+            Cooldown     = 18,
+            LayoutOrder  = 4,
+            Damage       = 16,
+            -- add ability-specific fields here
+        },
+    },
+
+    ChaseConfig = {
+        Radius = 100,   -- studs; survivors inside this radius trigger chase music
+        ID     = asset(0),  -- chase music asset ID
+        Layers = {
+            [1] = { Start = 0,     End = 10.13 },
+            [2] = { Start = 10.13, End = 20.24 },
+            [3] = { Start = 20.24, End = 40.45 },
+            [4] = { Start = 40.45, End = 90    },
+        },
+    },
+
+    Footsteps = {
+        asset(0), asset(0), asset(0), asset(0),
+    },
+
+    Sounds = {
+        SlashNoise = asset(0),
+        SlashHit   = asset(0),
+        Execution  = asset(0),
+    },
+
+    Animations = {
+        Idle = asset(0),
+        Walk = asset(0),
+        Run  = asset(0),
+        Stuns = {
+            Start = asset(0),
+            Loop  = asset(0),
+            End   = asset(0),
+        },
+        Attacks = {
+            Slash = asset(0),
+        },
+        Execution = {
+            KillerRig = asset(0),
+            PlayerRig = asset(0),
+        },
+    },
+    AnimationLooping = {
+        Idle = true,
+        Walk = true,
+        Run  = true,
+        Stuns = {
+            Start = false,
+            Loop  = true,
+            End   = false,
+        },
+        Attacks = {
+            Slash = false,
+        },
+        Execution = {
+            KillerRig = false,
+            PlayerRig = false,
+        },
+    },
+}
+```
+
+<Accordion title="Class archetypes">
+  The `Class` string is surfaced in the UI and used by any stat-modifier logic that cares about playstyle archetypes. Current values in production:
+
+  | Value | Description |
+  |-------|-------------|
+  | `"Rushdown"` | High-mobility, aggressive melee killers (e.g. JohnDoe) |
+  | `"Chaser"` | Sustained-pursuit killers with tracking or slow utilities (e.g. !Pursuer) |
+  | `"Killer"` | Generic fallback; use when no other archetype applies |
+
+  You can introduce a new string value freely — nothing will break — but existing UI strings only cover the values above.
+</Accordion>
+
+### Create `Manager/init.luau`
+
+The Manager module runs on both the server and the client. Its primary responsibility is to declare which `Abilities` folders map to which ability slots, and to hook into round-start events (dialogue, passive effects, tool attachment, etc.).
+
+```lua
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Abilities = script.Parent:WaitForChild("Abilities")
+
+local Behavior = {}
+
+-- Wire up ability slots in the order the AbilityManager expects them.
+-- Index 1 = M1, then Ability1, Ability2, Ability3, …
+Behavior.Abilities = {
+    [1] = Abilities.Slash,
+    [2] = Abilities.YourAbility,
+}
+
+-- Called by the ActorService when the killer's rig is ready.
+-- `Character` is the Model in workspace; `Actor` is the server-side actor object.
+function Behavior:Init(Character, Actor)
+    if not RunService:IsServer() then
+        return
+    end
+    -- Server-only setup: dialogue, passive listeners, attribute writes, etc.
+end
+
+-- Called when the killer performs an execution on `survivorRig`.
+function Behavior:OnExecute(killerRig, survivorRig)
+end
+
+return Behavior
+```
+
+The `Behavior.Abilities` array is indexed exactly like the `AbilityInfo` table in Config. Slot 1 is always the M1. Additional slots are matched by their position in the array, not by name.
+
+### Create ability scripts (`Server.luau` and `Client.luau`)
+
+Each ability lives in its own subfolder under `Abilities/`. The server script handles hitbox registration, damage dealing, and status effects. The client script handles animations, camera effects, and local VFX — it runs on **all** clients.
+
+**Server pattern** (based on the real Slash server script):
+
+```lua
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Paragon  = require(ReplicatedStorage.Modules.Main.Managers.AbilityManager)
+local Animations = require(ReplicatedStorage.Modules.Shared.Player.Animations)
+local Hitbox   = require(ReplicatedStorage.Modules.Shared.Gameplay.Hitboxes)
+local Sounds   = require(ReplicatedStorage.Modules.Main.Managers.SoundManager)
+local Util     = require(ReplicatedStorage.Modules.Shared.Core.Util)
+local StatusEffects = require(game.ServerScriptService.Modules.Services.StatusEffectsService)
+local AbilityCancel = require(ReplicatedStorage.Modules.Main.Managers.AbilityManager.Abilities)
+
+local MyAbility = {}
+
+function MyAbility:Init(Character, Actor)
+    if Character:GetAttribute("Stunned") then return end
+
+    local cancelCtx = AbilityCancel.Start(Character, "YourAbilityName")
+    local config = Actor.Config.AbilityInfo.YourAbilityName
+
+    -- Create a server-authoritative hitbox.
+    local newHitbox = Hitbox.new({
+        Owner        = Character,
+        Blacklist    = { Character },
+        HitType      = "StopOnHit",
+        Damage       = config.Damage,
+        WallBlockable = true,
+        WallBlockDamage = config.Damage,
+        Part         = Character.ServerHitbox,
+        Offset       = config.HitboxOffset,
+        Size         = config.HitboxSize,
+        Amount       = config.HitboxAmount,
+        Delay        = config.HitboxDelay,
+        Lifetime     = config.HitboxLifetime,
+        CanClash     = true,
+    })
+    cancelCtx:Add(function()
+        newHitbox:DestroyAll()
+    end)
+
+    -- Play animation and SFX.
+    local anim = Animations:LoadFromID(Character, {
+        Name   = "YourAbilityAttack",
+        ID     = Actor.Config.Animations.Attacks.YourAbility,
+        Looped = false,
+    })
+    if anim then
+        anim.Priority = Enum.AnimationPriority.Action4
+        anim:Play(0.05, 1, 1)
+    end
+
+    -- Handle hits.
+    newHitbox.HumanoidTouched:Connect(function(_, hitCharacter)
+        Util:ConfirmHit(hitCharacter)
+        -- Apply status effects, knockback, etc. here.
+    end)
+
+    -- Give cooldown and spawn the hitbox after the animation windup.
+    Paragon.Abilities:GiveCooldown(Actor, "YourAbilityName", nil, Actor.Player)
+    task.delay(config.HitboxSpawnDelay, function()
+        if cancelCtx.Cancelled or Character:GetAttribute("Stunned") then
+            cancelCtx:Complete()
+            return
+        end
+        newHitbox:CreateHitbox()
+    end)
+
+    if anim then
+        anim.Stopped:Connect(function()
+            cancelCtx:Complete()
+        end)
+    end
+end
+
+return MyAbility
+```
+
+**Client pattern** (handles local VFX and input locks for the local player only):
+
+```lua
+local Players = game:GetService("Players")
+local Player  = Players.LocalPlayer
+
+local MyAbilityClient = {}
+local activeCleanupByCharacter = {}
+
+function MyAbilityClient:Init(Character, Actor)
+    -- Early-out for characters that are not the local player.
+    if Character ~= Player.Character then return end
+
+    local existing = activeCleanupByCharacter[Character]
+    if existing then existing() end
+
+    local config = Actor.Config.AbilityInfo.YourAbilityName
+    local cleaned = false
+
+    local function cleanup()
+        if cleaned then return end
+        cleaned = true
+        activeCleanupByCharacter[Character] = nil
+        -- Tear down any local VFX, blur effects, FOV tweens, etc.
+    end
+
+    activeCleanupByCharacter[Character] = cleanup
+
+    -- Play camera effects, animations, blur, FOV zoom, etc. here.
+
+    -- Auto-cleanup after the ability window expires.
+    local lockDuration = math.max(0.35, config.HitboxSpawnDelay + config.HitboxLifetime + 0.18)
+    task.delay(lockDuration, cleanup)
+end
+
+function MyAbilityClient:OnCancel(Character, Actor)
+    local cleanup = activeCleanupByCharacter[Character]
+    if cleanup then cleanup() end
+end
+
+return MyAbilityClient
+```
+
+<Warning>
+  **Always validate hit targets on the server.** The client script runs on every client in the session and must never be trusted to report who was hit. All damage, status effects, and knockback must be applied exclusively inside `Server.luau` via the `Hitbox` module's `HumanoidTouched` callback. Never accept a player reference or character model from a remote event as the basis for dealing damage.
+</Warning>
+
+### Register the killer in DataService
+
+Open `ServerScriptService/Modules/Services/DataService.luau`. Locate the two tables near the top of the file:
+
+```lua
+local DEFAULT_ACTORS = {
+    Killers   = { "JohnDoe" },
+    Survivors = { "Brickbattler", "Vintage" },
+}
+local DEFAULT_VISIBLE = {
+    Killers   = { JohnDoe = true },
+    Survivors = { Brickbattler = true, Vintage = true },
+}
+```
+
+Add your killer's folder name (exact spelling, case-sensitive) to both tables:
+
+```lua
+local DEFAULT_ACTORS = {
+    Killers   = { "JohnDoe", "YourKillerName" },
+    Survivors = { "Brickbattler", "Vintage" },
+}
+local DEFAULT_VISIBLE = {
+    Killers   = { JohnDoe = true, YourKillerName = true },
+    Survivors = { Brickbattler = true, Vintage = true },
+}
+```
+
+`DEFAULT_ACTORS` controls which characters are granted to new accounts automatically. `DEFAULT_VISIBLE` controls which characters appear in the character-select UI without needing to be purchased. Set `Price = 0` in Config and add an entry to `DEFAULT_VISIBLE` if the character should be available to everyone for free.
+
+Also update the `Template.PurchasedKillers` array in the same file so existing accounts receive the new character on their next login:
+
+```lua
+PurchasedKillers = { "JohnDoe", "c00lkidd", "YourKillerName" },
+```
+
+### (Optional) Add a skin
+
+Skins live under `ReplicatedStorage/Assets/Skins/Killers/YourKillerName/`. Each skin is a folder named after the skin (e.g. `DefaultSkin`) containing a `Config.luau` that overrides fields from the base character config.
+
+```lua
+-- ReplicatedStorage/Assets/Skins/Killers/YourKillerName/DefaultSkin/Config.luau
+return {
+    Info = {
+        -- DisplayName and Description are optional overrides.
+    },
+    -- Override specific animations for this skin.
+    Animations = {
+        Idle = "rbxassetid://YOUR_IDLE_ANIMATION_ID",
+        Walk = "rbxassetid://YOUR_WALK_ANIMATION_ID",
+        Run  = "rbxassetid://YOUR_RUN_ANIMATION_ID",
+    },
+    Price = 0,
+}
+```
+
+The `Characters` module merges the skin config on top of the base config at runtime, so only the fields you specify are overridden — everything else falls back to the base character config.
+
+</Steps>
+
+---
+
+## Reference: JohnDoe's Slash — full server script
+
+The following is the actual `Server.luau` for JohnDoe's Slash ability. Study it to understand the complete hitbox lifecycle, cancel context, speed-bonus application, and death-launch logic:
+
+```lua
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = {
+    Hitbox       = ReplicatedStorage.Modules.Shared.Gameplay.Hitboxes,
+    Sounds       = ReplicatedStorage.Modules.Main.Managers.SoundManager,
+    Util         = ReplicatedStorage.Modules.Shared.Core.Util,
+    Animations   = ReplicatedStorage.Modules.Shared.Player.Animations,
+    StatusEffects = ReplicatedStorage.Modules.Shared.Gameplay.StatusEffects,
+}
+local Paragon       = require(ReplicatedStorage.Modules.Main.Managers.AbilityManager)
+local Animations    = require(Shared.Animations)
+local Hitbox        = require(Shared.Hitbox)
+local Sounds        = require(Shared.Sounds)
+local Util          = require(ReplicatedStorage.Modules.Shared.Core.Util)
+local StatusEffects = require(game.ServerScriptService.Modules.Services.StatusEffectsService)
+local AbilityCancel = require(ReplicatedStorage.Modules.Main.Managers.AbilityManager.Abilities)
+local ActorService  = require(game.ServerScriptService.Modules.Services.ActorService)
+
+local SlashServer = {}
+
+function SlashServer:Init(Character, Actor)
+    if Character:GetAttribute("Stunned") then return end
+
+    local cancelCtx  = AbilityCancel.Start(Character, "Slash")
+    local slashConfig = Actor.Config.AbilityInfo.Slash
+
+    local newHitbox = Hitbox.new({
+        Owner           = Character,
+        Blacklist       = { Character },
+        HitType         = "StopOnHit",
+        Damage          = slashConfig.Damage,
+        WallBlockable   = true,
+        WallBlockDamage = slashConfig.Damage,
+        Part            = Character.ServerHitbox,
+        Offset          = slashConfig.HitboxOffset,
+        Size            = slashConfig.HitboxSize,
+        Amount          = slashConfig.HitboxAmount,
+        Delay           = slashConfig.HitboxDelay,
+        Lifetime        = slashConfig.HitboxLifetime,
+        ExecuteOnKill   = true,
+        CanClash        = true,
+    })
+    cancelCtx:Add(function() newHitbox:DestroyAll() end)
+
+    local SlashAnim = Animations:LoadFromID(Character, {
+        Name   = "SlashAttack",
+        ID     = Actor.Config.Animations.Attacks.Slash,
+        Looped = false,
+    })
+    local SlashSFX = Sounds:LoadSound({
+        SoundId      = Actor.Config.Sounds.SlashNoise,
+        Parent       = Character.PrimaryPart,
+        DestroyOnEnd = true,
+    })
+
+    if SlashAnim then
+        SlashAnim.Looped   = false
+        SlashAnim.Priority = Enum.AnimationPriority.Action4
+        SlashAnim:Play(0.05, 1, 1)
+        SlashSFX:Play()
+    end
+
+    newHitbox.HumanoidTouched:Connect(function(_, character)
+        local hrp            = character and character:FindFirstChild("HumanoidRootPart")
+        local victimHumanoid = character and character:FindFirstChildOfClass("Humanoid")
+        local player         = game.Players:GetPlayerFromCharacter(character)
+
+        Util:ConfirmHit(character)
+        Util:CreateSpeedMultiplier(
+            character,
+            slashConfig.HitSpeedBonusMultiplier or 1.5,
+            "HitSpeedBonus",
+            slashConfig.HitSpeedBonusDuration   or 1.25
+        )
+
+        local hitSound = Sounds:LoadSound({
+            Name         = "SlashHit",
+            SoundId      = Actor.Config.Sounds.SlashHit,
+            Parent       = Character.HumanoidRootPart,
+            DestroyOnEnd = true,
+        })
+        if player then
+            ActorService:CancelAbilities(player, "cancel")
+        end
+        if hrp then hitSound:Play() end
+
+        task.delay(0.05, function()
+            if not (hrp and victimHumanoid and victimHumanoid.Health <= 0) then return end
+            local launchDir      = Character.HumanoidRootPart.CFrame.LookVector
+            local launchVelocity = (launchDir * 165) + Vector3.new(0, 75, 0)
+            character:SetAttribute("BrokenRagdollLaunchVelocity", launchVelocity)
+            character:SetAttribute("BrokenRagdollLaunchNonce",    os.clock())
+        end)
+    end)
+
+    Paragon.Abilities:GiveCooldown(Actor, "Slash", nil, Actor.Player)
+
+    task.delay(slashConfig.HitboxSpawnDelay, function()
+        if cancelCtx.Cancelled or Character:GetAttribute("Stunned") then
+            cancelCtx:Complete()
+            return
+        end
+        newHitbox:CreateHitbox()
+    end)
+
+    SlashAnim.Stopped:Connect(function()
+        cancelCtx:Complete()
+    end)
+end
+
+return SlashServer
+```

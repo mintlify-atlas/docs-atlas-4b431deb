@@ -1,0 +1,354 @@
+---
+title: "Survivor Roster: Abilities, Passives, and Configuration"
+sidebarTitle: "Survivors"
+description: "A complete reference for all five Shattered Reality Survivors — their ability sets, passive mechanics, sprint tuning, and key config values sourced directly from the game."
+---
+
+Survivors must escape or outlast the Killer each round. Where Killers rely on high health and burst pressure, Survivors trade durability for speed and utility — their abilities skew toward evasion, self-sustain, and disrupting the Killer's momentum. Each Survivor has a `Class` archetype, a unique `AbilityInfo` table, and a `SprintConfig` tuned for their intended role.
+
+<Tip>
+  During development and testing you can bypass round-start character selection by running the mod command `SetEquippedCharacter <role> <name>` — for example `SetEquippedCharacter Survivor Brickbattler` — to force a specific Survivor to spawn immediately without waiting for the lobby assignment phase.
+</Tip>
+
+## Survivor Profiles
+
+<Tabs>
+  <Tab title="Kane">
+    **Display Name:** Kane — *The Fierce Combatant*
+    **Class:** Sentinel | **MaxHealth:** 95 | **Price:** 0
+
+    Kane is currently a special-access Survivor (marked `disabled_actors` in `Characters.luau`). He features a unique **stance-switch** system — two distinct move sets called **Agile** and **Aggressive** — each with its own overriding `SprintConfig`. His loadout consists of melee and ranged options: Bonebreaker (axe), Deadshot (pistol), and Swift Flick (parkour dash).
+
+    ### Default Sprint Configuration
+
+    ```lua
+    SprintConfig = {
+        Stamina     = 100,
+        MaxStamina  = 100,
+        WalkSpeed   = 11.5,
+        SprintSpeed = 24,
+        SprintLoss  = 12,
+        SprintGain  = 24,
+    },
+    ```
+
+    ### Stance-Specific Sprint Overrides
+
+    ```lua
+    Stances = {
+        Agile = {
+            SprintConfig = {
+                MaxStamina  = 90,
+                WalkSpeed   = 12.5,
+                SprintSpeed = 26,
+                SprintLoss  = 14,
+                SprintGain  = 20,
+            },
+        },
+        Aggressive = {
+            SprintConfig = {
+                MaxStamina  = 115,
+                WalkSpeed   = 10,
+                SprintSpeed = 23,
+                SprintLoss  = 11,
+                SprintGain  = 25,
+            },
+        },
+    },
+    ```
+
+    Agile stance prioritises raw speed at the cost of stamina capacity; Aggressive stance yields a larger stamina pool and faster regeneration while slowing overall movement.
+
+    ### Abilities
+
+    <Accordion title="Bonebreaker (Ability2) — Cooldown: 37s">
+      A lunging axe swing that propels Kane forward at 90 studs/s. Deals 25 damage and stuns the Killer for 2 s on hit.
+
+      ```lua
+      AxeSwing = {
+          Name        = "Bonebreaker",
+          Type        = "Ability2",
+          Cooldown    = 37,
+          Damage      = 25,
+          ForwardVelocity    = 90,
+          ForwardEndVelocity = 30,
+          ForwardDuration    = 0.25,
+          StunTime    = 2,
+          HitboxSize  = Vector3.new(5, 6, 5),
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Deadshot (Ability5) — Cooldown: 47s, 15 charges">
+      Kane's pistol holds 15 rounds, starting empty (`InitialCharges = 0`). Each shot deals 40 damage and has a chance to stun the Killer (`ShootChance = 65`, raised to `LMSShootChance = 85` in LMS). The gun can jam after a shot, requiring a 5.5 s fix animation.
+
+      ```lua
+      Pistol = {
+          Name           = "Deadshot",
+          Type           = "Ability5",
+          Cooldown       = 47,
+          MaxCharges     = 15,
+          InitialCharges = 0,
+          ReloadDuration = 3,
+          JamCooldown    = 18,
+          JamFixDuration = 5.5,
+          ShootDamage    = 40,
+          ShootChance    = 65,
+          LMSShootChance = 85,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Swift Flick (Ability3) — Cooldown: 12s">
+      A direction-based parkour move. Kane slides or wall-jumps depending on the input direction, carrying momentum for 2.15 s with an end speed of 20 studs/s.
+
+      ```lua
+      SwiftFlick = {
+          Name     = "Swift Flick",
+          Type     = "Ability3",
+          Cooldown = 12,
+          Duration = 2.15,
+          EndSpeed = 20,
+      },
+      ```
+    </Accordion>
+  </Tab>
+
+  <Tab title="Brickbattler">
+    **Display Name:** Brickbattler — *The Swift Rocketeer*
+    **Class:** Sentinel | **MaxHealth:** 100 | **Price:** 0
+
+    Brickbattler is one of the two default unlocked Survivors and the default equipped character on a new account. She is a straightforward aggressive Survivor: her two abilities are a dash that penetrates through the Killer and a rocket launcher that deals heavy knockback and damage.
+
+    ### Sprint Configuration
+
+    ```lua
+    SprintConfig = {
+        Stamina     = 100,
+        MaxStamina  = 100,
+        WalkSpeed   = 11.5,
+        SprintSpeed = 25,
+        SprintLoss  = 12,
+        SprintGain  = 24.5,
+    },
+    ```
+
+    ### Abilities
+
+    <Accordion title="Piercing Dash (Ability1) — Cooldown: 30s">
+      A forward dash at 50 studs/s that phases through the Killer, dealing 15 damage and stunning for 1.2 s. Missing applies a `MissSlowLevel = 2` slow for 1.2 s. On hit, reduces Rocket Launcher cooldown by `RocketCooldown = 11` s.
+
+      ```lua
+      PiercingDash = {
+          Name                 = "Piercing Dash",
+          Type                 = "Ability1",
+          Cooldown             = 30,
+          PiercingDashDamage   = 15,
+          PiercingDashStunTime = 1.2,
+          ForceSpeed           = 50,
+          MissSlowLevel        = 2,
+          MissSlowDuration     = 1.2,
+          RocketCooldown       = 11,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Rocket Launcher (Ability2) — Cooldown: 40s">
+      Fires a rocket at 130 studs/s with a `BlastRadius = 8`. Deals 40 damage and stuns the Killer for up to 2.5 s depending on distance. Close-range hits (`RocketCloseStunDistance = 10`) reduce the stun to 1.35 s. Also applies hearing loss for 4 s and knocks the Killer back.
+
+      ```lua
+      RocketLauncher = {
+          Name                    = "Rocket Launcher",
+          Type                    = "Ability2",
+          Cooldown                = 40,
+          RocketSpeed             = 130,
+          RocketDamage            = 40,
+          RocketStunTime          = 2.5,
+          RocketCloseStunTime     = 1.35,
+          BlastRadius             = 8,
+          HearingLossTime         = 4,
+          KillerKnockbackForce    = 8,
+          KillerKnockbackDuration = 0.16,
+      },
+      ```
+    </Accordion>
+  </Tab>
+
+  <Tab title="Jane Doe">
+    **Display Name:** Jane Doe — *The Blissful Widow*
+    **Class:** Survivalist | **MaxHealth:** 95 | **Price:** 0
+
+    Jane Doe is a self-sustain Survivor with a lore connection to the Killer John Doe. She has the highest base `SprintSpeed` of any Survivor (29), making her one of the best at kiting the Killer in open areas. Her single combat ability heals herself and applies a slowness effect to the Killer simultaneously.
+
+    ### Sprint Configuration
+
+    ```lua
+    SprintConfig = {
+        Stamina     = 100,
+        MaxStamina  = 100,
+        WalkSpeed   = 11,
+        SprintSpeed = 29,
+        SprintLoss  = 14,
+        SprintGain  = 25.5,
+    },
+    ```
+
+    <Note>
+      Jane Doe is connected to John Doe via his `Connection = {"JaneDoe"}` killer config field. When John Doe is the active Killer and Jane Doe is alive, the LMS phase plays a unique paired theme (`ThemeID = "rbxassetid://114037366568111"`).
+    </Note>
+
+    ### Abilities
+
+    <Accordion title="Latching Vow (Ability1) — Cooldown: 25s">
+      Jane Doe strikes the Killer, applying a slowness stack and healing herself for 5 HP. If the heal would take her above her base health, she gains an overheal buffer of up to 10 HP. Also knocks the Killer back at 12.5 force.
+
+      ```lua
+      LatchingVow = {
+          Name              = "Latching Vow",
+          Type              = "Ability1",
+          Cooldown          = 25,
+          StartupDelay      = 0.417,
+          HitDelay          = 0.917,
+          HealthGivenOnHit  = 5,
+          OverhealAmount    = 10,
+          SlownessStacks    = 1,
+          SlownessDuration  = 2,
+          KnockbackForce    = 12.5,
+      },
+      ```
+    </Accordion>
+  </Tab>
+
+  <Tab title="Nova">
+    **Display Name:** Vintage — *The Starlight Pursuer*
+    **Class:** Survivalist | **MaxHealth:** 100 | **Price:** 0
+
+    Nova (folder name `Nova`, display name "Vintage") is the standard Vintage Survivor character. She is one of the two default unlocked Survivors and shares her display name with `!Vintage` — the two are distinct characters with very different stat profiles. Nova's sole ability is a self-heal that locks her movement during the animation.
+
+    ### Sprint Configuration
+
+    ```lua
+    SprintConfig = {
+        Stamina     = 100,
+        MaxStamina  = 100,
+        WalkSpeed   = 11.5,
+        SprintSpeed = 25,
+        SprintLoss  = 12,
+        SprintGain  = 24.5,
+    },
+    ```
+
+    ### Abilities
+
+    <Accordion title="Lunar Eclipse (Ability2) — Cooldown: 20s">
+      Channels a cosmic heal animation for ~2.2 s (`HealDelay = 2.185`), restoring 10 HP. Movement is locked (`LockMovement = true`) for the cast duration, so it must be used safely out of the Killer's sight.
+
+      ```lua
+      LunarEclipse = {
+          Name         = "Lunar Eclipse",
+          Type         = "Ability2",
+          Cooldown     = 20,
+          HealAmount   = 10,
+          VFXDelay     = 0.2,
+          VFXDuration  = 3,
+          SoundDelay   = 0.275,
+          HealDelay    = 2.185,
+          LockMovement = true,
+      },
+      ```
+    </Accordion>
+  </Tab>
+
+  <Tab title="!Vintage">
+    **Display Name:** Vintage — *The Starlight Pursuer*
+    **Class:** Survivalist | **MaxHealth:** 500 | **Price:** 0
+
+    `!Vintage` is a special-access variant of the Vintage character with dramatically amplified stats and a three-ability loadout. With **500 health**, vastly boosted stamina, and a much faster walk speed, this character is designed for premium or developer-only use rather than standard public matchmaking.
+
+    ### Sprint Configuration
+
+    ```lua
+    SprintConfig = {
+        Stamina     = 230,
+        MaxStamina  = 250,
+        WalkSpeed   = 13.5,
+        SprintSpeed = 25,
+        SprintLoss  = 12,
+        SprintGain  = 24.5,
+    },
+    ```
+
+    <Warning>
+      `!Vintage`'s `MaxHealth = 500` and `Stamina = 250` far exceed any Killer's expected damage output per engagement. This character requires a `CharacterAccessOverride` to unlock and is not intended for standard play.
+    </Warning>
+
+    ### Abilities
+
+    <Accordion title="Void Throw (Ability1) — Cooldown: 15s">
+      Throws a gravitational projectile at 80 studs/s. On detonation (manual or on expiry after 4 s) it creates a 35-stud implosion blast that pulls the Killer inward at `ImplosionPower = 700` and deals 95 damage.
+
+      ```lua
+      VoidThrow = {
+          Name              = "Void Throw",
+          Type              = "Ability1",
+          Cooldown          = 15,
+          Damage            = 95,
+          ProjectileSpeed   = 80,
+          Lifetime          = 4,
+          BlastRadius       = 35,
+          LMSBlastRadius    = 20,
+          ImplosionPower    = 700,
+          ImplosionDuration = 0.35,
+          StunTime          = 1,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Lunar Eclipse (Ability2) — Cooldown: 20s">
+      Same cast mechanic as Nova's Lunar Eclipse but with a significantly higher `HealAmount = 54`.
+
+      ```lua
+      LunarEclipse = {
+          Name         = "Lunar Eclipse",
+          Type         = "Ability2",
+          Cooldown     = 20,
+          HealAmount   = 54,
+          VFXDelay     = 0.2,
+          VFXDuration  = 3,
+          HealDelay    = 2.185,
+          LockMovement = true,
+      },
+      ```
+    </Accordion>
+
+    <Accordion title="Jobless Overload (Ability3) — Cooldown: 35s">
+      Deploys up to 3 autonomous turret-like summons that fire homing projectiles at the Killer within 35 studs. Each summon lasts 30 s, rises from the ground over 0.45 s, and fires every 1.5 s.
+
+      ```lua
+      JoblessOverload = {
+          Name           = "Jobless Overload",
+          Type           = "Ability3",
+          Cooldown       = 35,
+          Damage         = 15,
+          MaxSummons     = 3,
+          SummonLifetime = 30,
+          AttackRange    = 35,
+          FireInterval   = 1.5,
+          ThrowVelocity  = 99,
+          HomingDistance = 35,
+          HomingTurnSpeed = 14,
+      },
+      ```
+    </Accordion>
+  </Tab>
+</Tabs>
+
+## Survivor Stats Summary
+
+| Survivor | Class | MaxHealth | SprintSpeed | WalkSpeed |
+|---|---|---|---|---|
+| Kane | Sentinel | 95 | 24 (Agile: 26) | 11.5 (Agile: 12.5) |
+| Brickbattler | Sentinel | 100 | 25 | 11.5 |
+| Jane Doe | Survivalist | 95 | 29 | 11 |
+| Nova (Vintage) | Survivalist | 100 | 25 | 11.5 |
+| !Vintage | Survivalist | 500 | 25 | 13.5 |

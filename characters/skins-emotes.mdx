@@ -1,0 +1,274 @@
+---
+title: "Skins and Emotes: Cosmetic Customization System"
+sidebarTitle: "Skins & Emotes"
+description: "How Shattered Reality's skin Config/Behavior system works, how skins override character visuals and data, and the full emote module structure with known emotes listed."
+---
+
+Shattered Reality supports a layered cosmetic system for both Killers and Survivors. Skins override visual assets and can optionally inject custom runtime logic through a `Behavior` module. Emotes are self-contained modules that play animations and sounds and hook into the player's speed multiplier stack during playback.
+
+## Skin System Overview
+
+Every skin lives under a role-scoped path in `ReplicatedStorage/Assets/Skins/`:
+
+```
+Assets/Skins/
+├── Killers/
+│   ├── JohnDoe/
+│   │   ├── EverlastingJD/
+│   │   │   └── Config.luau        ← Required
+│   │   └── Ignis/
+│   │       └── Config.luau
+│   ├── TheClown/
+│   │   ├── LaughingStockTheClown/
+│   │   └── PorpolDummersTheClown/
+│   └── Wirefly/
+│       └── Cloaker/
+└── Survivors/
+    ├── Brickbattler/
+    │   └── El33tBrickbattler/
+    └── Kane/
+        ├── #YourselfKane/
+        │   ├── Config.luau        ← Required
+        │   └── Behavior.luau      ← Optional custom logic
+        ├── #Yourself2Kane/
+        ├── Dued1Kane/
+        ├── GirlKane/
+        ├── HugeKane/
+        ├── JimGreyKane/
+        ├── LegacyKane/
+        ├── LegacyKaneModerator/
+        └── XxAevonbonecrusher12xXKane/
+```
+
+The `Characters` module resolves skins using `Characters.GetSkinFolder(actor_type, actor_name, skin_name)`. Lookups are case-insensitive and strip leading `!` characters from names, matching the same normalisation rules used for character folders.
+
+## Config.luau — Required
+
+Every skin must export a flat table from its `Config.luau`. The skin config is **deep-merged on top of the base character config** using `merge_into`, so any field present in the skin config overrides the corresponding field in the character config.
+
+The two JohnDoe skin configs currently ship with minimal overrides — they primarily serve as registration points for custom rig animations and price data:
+
+```lua
+-- Assets/Skins/Killers/JohnDoe/EverlastingJD/Config.luau
+return {
+    Info = {},
+    Animations = {
+        Idle = "rbxassetid://79651299664383",
+        Walk = "rbxassetid://90429085266790",
+        Run  = "rbxassetid://90202246338755",
+    },
+    Price = 0,
+}
+```
+
+```lua
+-- Assets/Skins/Killers/JohnDoe/Ignis/Config.luau
+return {
+    Info = {},
+    Animations = {
+        Idle = "rbxassetid://130312946913999",
+        Walk = "rbxassetid://115125634768700",
+        Run  = "rbxassetid://78927740329579",
+    },
+    Price = 0,
+}
+```
+
+The Kane `#YourselfKane` skin includes display metadata alongside its assets:
+
+```lua
+-- Assets/Skins/Survivors/Kane/#YourselfKane/Config.luau
+return {
+    Info = {
+        DisplayName = "Yourself",
+        Description = "Son aint that you?",
+    },
+    Price = 0,
+    Assets = {
+        Fleshcutter  = script.Fleshcutter,
+        SeveringBlade = script.SeveringBlade,
+    },
+}
+```
+
+<Info>
+  Fields that are present in the base character config but absent from the skin config are **not** removed — `merge_into` only overwrites keys that exist in the skin table. This means a skin only needs to include the fields it actually changes.
+</Info>
+
+## Behavior.luau — Optional
+
+A skin may include an optional `Behavior.luau` (or a `Manager/` folder) that is loaded by `Characters.GetSkinManagerModule`. The behavior module runs additional logic when the skin is applied to a live rig — for example, fetching the player's actual Roblox appearance.
+
+The `#YourselfKane` behavior is the canonical example: it loads the player's `HumanoidDescription` from Roblox's API and applies it to the cloned rig, making Kane visually mirror the player's own avatar.
+
+```lua
+-- Assets/Skins/Survivors/Kane/#YourselfKane/Behavior.luau
+local Players = game:GetService("Players")
+
+return {
+    ApplyRig = function(_, actor)
+        local rig = actor.Rig:Clone()
+        rig:PivotTo(CFrame.new(0, 100000, 0))
+
+        local root = rig.PrimaryPart or rig:FindFirstChild("HumanoidRootPart")
+        if root then
+            root.Anchored = true
+        end
+
+        rig.Parent = workspace
+
+        pcall(function()
+            local description = Players:GetHumanoidDescriptionFromUserId(actor.Player.UserId)
+            rig.Humanoid:ApplyDescription(description, Enum.AssetTypeVerification.Always)
+        end)
+
+        return rig
+    end,
+}
+```
+
+The `ApplyRig` function receives the actor context and must return the configured rig model. The `pcall` wrapper around `ApplyDescription` ensures that failures (e.g. network timeouts) do not prevent the skin from loading.
+
+## Full Skin Roster
+
+<CardGroup cols={2}>
+  <Card title="Killer Skins" icon="skull">
+    **John Doe**
+    - `EverlastingJD` — custom Idle / Walk / Run animations
+    - `Ignis` — custom Idle / Walk / Run animations
+
+    **The Clown**
+    - `LaughingStockTheClown`
+    - `PorpolDummersTheClown`
+
+    **Wirefly**
+    - `Cloaker`
+  </Card>
+  <Card title="Survivor Skins" icon="person-running">
+    **Brickbattler**
+    - `El33tBrickbattler`
+
+    **Kane**
+    - `#Yourself` — mirrors player's own Roblox avatar (has Behavior.luau)
+    - `#Yourself2`
+    - `Dued1`
+    - `Girl`
+    - `Huge`
+    - `JimGrey`
+    - `Legacy`
+    - `LegacyModerator`
+    - `XxAevonbonecrusher12xX`
+  </Card>
+</CardGroup>
+
+<Tip>
+  To equip a skin on a live server for testing without going through the inventory UI, use the mod command `SetEquippedSkin <role> <character> <skin>` — for example `SetEquippedSkin Survivor Kane #Yourself`. The skin name is resolved with the same fuzzy-matching logic used in `Characters.ResolveSkinName`, so partial names and case variations are accepted.
+</Tip>
+
+## Emote System
+
+Emotes are self-contained ModuleScripts stored under `ReplicatedStorage/Assets/Emotes/`. Each emote module exports a table with the following standard fields and lifecycle methods:
+
+| Field / Method | Type | Purpose |
+|---|---|---|
+| `Name` | `string` | Display name shown in the emote wheel |
+| `AnimationID` | `string` | `rbxassetid://…` for the looping animation track |
+| `SoundID` | `string` | `rbxassetid://…` for the accompanying audio |
+| `SoundLooped` | `boolean` | Whether the sound loops for the emote's duration |
+| `AnimLooped` | `boolean` | Whether the animation track loops |
+| `Start(self)` | `function` | Called when the emote begins; sets up client-side speed multipliers |
+| `Stop(self, Character)` | `function` | Called when the emote ends; cleans up sounds and multipliers |
+
+Both `Start` and `Stop` run in a **dual-context** pattern — they check `RunService:IsClient()` / `IsServer()` and branch accordingly. The client side creates a `MultiplierManager` entry that zeros the player's speed (preventing movement during the emote), while the server side destroys the associated sound instance from the character's `HumanoidRootPart`.
+
+### Example — Aura Emote
+
+```lua
+-- Assets/Emotes/Aura.luau
+local Aura = {
+    Name        = "Aura",
+    AnimationID = "rbxassetid://85437267030889",
+    SoundID     = "rbxassetid://123447115481080",
+    SoundLooped = true,
+    AnimLooped  = true,
+}
+
+function Aura:Start()
+    if game["Run Service"]:IsClient() then
+        local MultiplierManager = require(
+            game:GetService("ReplicatedStorage").Modules.Main.Managers.MultiplierManager
+        )
+        MultiplierManager:CreateMultiplier("Speed", "AuraMultiplier", 0)
+    end
+end
+
+function Aura:Stop(Character)
+    if game["Run Service"]:IsServer() then
+        local sound = Character.HumanoidRootPart:FindFirstChild("Aura")
+        if sound then sound:Destroy() end
+    else
+        local MultiplierManager = require(
+            game:GetService("ReplicatedStorage").Modules.Main.Managers.MultiplierManager
+        )
+        MultiplierManager:DeleteMultiplier("Speed", "AuraMultiplier")
+        Animations:StopSpecificAnimation(Character, "Aura")
+    end
+end
+```
+
+### Example — Jevil Dance Emote
+
+```lua
+-- Assets/Emotes/JevilDance.luau
+local JevilDance = {
+    Name        = "Jevil Dance",
+    AnimationID = "rbxassetid://115787196443472",
+    SoundID     = "rbxassetid://84115223812403",
+    SoundLooped = true,
+    AnimLooped  = true,
+}
+
+function JevilDance:Start()
+    if game["Run Service"]:IsClient() then
+        MultiplierManager:CreateMultiplier("Speed", "JevilMultiplier", 0)
+    end
+end
+
+function JevilDance:Stop(Character)
+    if game["Run Service"]:IsServer() then
+        local sound = Character.HumanoidRootPart:FindFirstChild("JevilDance")
+        if sound then sound:Destroy() end
+    else
+        MultiplierManager:DeleteMultiplier("Speed", "JevilMultiplier")
+        Animations:StopSpecificAnimation(Character, "JevilDance")
+    end
+end
+```
+
+## Known Emotes
+
+All five emotes ship in the default `EquippedEmotes` slot and are auto-granted to every player profile via `normalizeEmotes` in `DataService`:
+
+<Accordion title="Aura">
+  A slow, ambient pose with a looping aura sound effect. The `Aura` emote is the only one guaranteed to be present in every player's emote wheel — `DataService.normalizeEmotes` inserts it if it is missing.
+</Accordion>
+
+<Accordion title="IMissTheQuiet">
+  A reflective standing animation. No combat interactions; intended as a cosmetic expression emote.
+</Accordion>
+
+<Accordion title="Jevil Dance">
+  An energetic dance animation paired with a looping music track. Zeroes movement speed for the duration via `JevilMultiplier`.
+</Accordion>
+
+<Accordion title="Static">
+  A glitchy, static-distortion style emote. Consistent with the game's digital horror aesthetic.
+</Accordion>
+
+<Accordion title="WithFriends">
+  A group-themed emote. Designed to be used in proximity with other players.
+</Accordion>
+
+<Note>
+  Emote syncing across clients is controlled by the `EmoteSyncing` player setting. Players can also suppress emote audio with `DisableEmoteSFX = true` and all emote VFX with `DisableEmoteVFX = true` in their settings profile.
+</Note>

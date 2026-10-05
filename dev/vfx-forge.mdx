@@ -1,0 +1,242 @@
+---
+title: "ForgeVFX: Visual Effects Library for Abilities"
+sidebarTitle: "ForgeVFX"
+description: "ForgeVFX (VFX-DL v1.0) is the visual effects engine powering beams, shockwaves, camera shake, particles, screen effects, and mesh animations for all ability VFX in Shattered Reality."
+---
+
+ForgeVFX is a third-party Roblox VFX library authored by `zilibobi` and licensed under the **VFX Forge Developer License (VFX-DL) v1.0**. Shattered Reality uses it as the backbone for all ability visual effects — from JohnDoe's pounce slam to shockwave rings that project onto geometry. The library is located at `ReplicatedStorage/Modules/Main/Helper/ForgeVFX/` and is initialised once on the client via `api.init()`.
+
+<Warning>
+The VFX-DL license (Section 2 & 3c) explicitly prohibits loading ForgeVFX in **any Roblox Studio plugin, editor extension, or developer tool**. It may only run inside the normal game runtime of a Roblox Experience — including playtesting in Studio. Any derivative work must carry the same VFX-DL license and include the full license text. If you violate the license your rights terminate immediately (Section 6).
+</Warning>
+
+## Initialization
+
+```lua
+local ForgeVFX = require(ReplicatedStorage.Modules.Main.Helper.ForgeVFX)
+
+-- Must be called once on the client before any api.emit() calls
+ForgeVFX.init()
+
+-- To tear down (e.g. during a test runner cleanup):
+ForgeVFX.deinit()
+```
+
+`init()` registers collision groups, creates a shared `ObjectCache` of 150 pooled `Part` instances, pre-loads textures tagged with the texture-load tag, and starts the `CameraShake` render step binding. On the server the call returns early after registering collision groups.
+
+## Effect Modules
+
+### `beam` — Dynamic Beam Animations
+
+Animates a `Beam` instance's width, transparency, and texture speed over a configurable duration. Supports independent start/end values for both attachment widths and an `EmitDelay` before the beam activates.
+
+```lua
+-- beam.emit(ref, obj, scope, scale)
+-- ref = the template Beam (holds attribute config)
+-- obj = the live clone parented into workspace.Terrain
+-- Relevant attributes on ref:
+--   Duration, Width0_Start/End, Width1_Start/End,
+--   Transparency_Scale_Start/End, Speed_Start/End, EmitDelay
+```
+
+### `camera_shake` — Screen Shake
+
+Runs on a `RayValue` tagged with the screenshake tag. Creates a `Shake` object and adds it to an `activeShakes` list updated every `RenderStepped` frame. Shake amplitude falls off with distance from the origin attachment.
+
+```lua
+-- Key attributes on the RayValue:
+--   Amplitude (default 2.5), Frequency (default 0.2)
+--   FadeInTime (0.3), SustainTime (1), FadeOutTime (2)
+--   Falloff (30 studs), EmitDuration (0 = single burst)
+--   PositionInfluence (Vector3), RotationInfluence (Vector3 * 0.2)
+```
+
+### `shockwave_ring` — Ground-Projected Rings
+
+Raycasts downward from `segments` equally-spaced points around a `radius` to find the ground surface, then spawns pooled parts from `ObjectCache` that expand and fade out. Part colour and material are sampled from the hit surface.
+
+```lua
+-- Key attributes on the Part (inside a "Rings" folder):
+--   Radius (5), Segments (7)
+--   Lifetime (NumberRange 2–3)
+--   MinSize / MaxSize (Vector3)
+--   SizeScaleStart / SizeScaleEnd, Transparency_Start/End
+--   EmitDelay, Offset_Start/End
+```
+
+### `shockwave_debris` — Scattered Debris
+
+Same raycast approach as `shockwave_ring` but targets the `"Debris"` folder. Debris parts tumble outward from the impact point rather than expanding in a ring formation.
+
+### `shockwave_line` — Radial Line Pulses
+
+Targets the `"Lines"` folder. Emits line-shaped parts along the radial directions from the attachment origin.
+
+### `particle` — Particle Emitter Wrapper
+
+Handles `ParticleEmitter` instances. Supports delayed emit, burst count (`EmitCount`), duration-based streaming (`EmitDuration`), and `TimeScale` animation to ramp particle speed up or down over a tween.
+
+```lua
+-- Key attributes on the ParticleEmitter:
+--   EmitDelay (0), EmitCount (1), EmitDuration (0 = instant burst)
+--   TimeScale_Start / TimeScale_End, TimeScale_Duration
+```
+
+### `screen` — Screen-Space VFX
+
+Locks a `BasePart` to the camera plane every `RenderStepped` frame, scaling it to fill the viewport at a configurable `PartDistance`. Used for full-screen overlays, flashes, and hit indicators.
+
+```lua
+-- Key attributes on the BasePart (must have Enabled = true):
+--   PartScale (Vector3, default 1,1,1)
+--   PartDistance (1.5 studs from camera)
+--   OffsetPosition / OffsetRotation (studs / degrees)
+```
+
+### `spin` — Model Rotation Animation
+
+Rotates a `Model` about its pivot over `SpinDuration` seconds, with optional scale animation from `Scale_Start` to `Scale_End`. Optionally synchronises the pivot to a parent `Attachment` or `BasePart` each frame.
+
+```lua
+-- Key attributes on the Model:
+--   SpinRotation (Vector3 degrees/s), SpinDuration (0.5)
+--   Scale_Start (1), Scale_End (1)
+--   SpinSpeed_Start / SpinSpeed_End, SyncPosition (false)
+```
+
+### `mesh` — Mesh-Based VFX Objects
+
+Emits mesh-based VFX from a `Start` part using `ObjectCache` pooling. Mesh VFX objects are identified by the `utility.isMeshVFX` tag check and support `EmitCount` for burst emission.
+
+### `tween_property` — Tweened Property Animation
+
+Animates an arbitrary property on a `RayValue`'s parent instance over time using the `tween` module's Bezier-based easing system.
+
+### `bezier` — Bezier-Curve Parts
+
+Creates a series of parts along a Bezier path. Emitted from objects tagged with the bezier tag. Shares the same `ObjectCache` as shockwave modules.
+
+## Utility Sub-modules
+
+### `mod/` Folder
+
+| Module | Purpose |
+|---|---|
+| `lerp` | Generic lerp helpers for scalars, vectors, and colours |
+| `color/Oklab` | Oklab perceptual colour space conversion for smooth colour interpolation |
+| `color/sRGB` | sRGB ↔ linear conversion utilities |
+| `logger` | Internal logging wrapper (`logger.warn`, `logger.error`) |
+| `shape` | Geometry helpers (normals, orientation from two points) |
+| `tween` | Bezier-based tween runner used by all effect modules |
+| `utility` | Core helpers: `getAttribute`, `copyProperties`, `cleanupScope`, collision group setup, tag constants |
+
+### `obj/` Folder
+
+| Module | Purpose |
+|---|---|
+| `Bezier` | Bezier path computation and part animation |
+| `ObjectCache` | Part pooling system — keeps a fixed-size pool of pre-allocated instances to avoid repeated `Instance.new` calls |
+| `Promise` | Promise implementation for async emit flows |
+| `Shake` | Screen-shake math using perlin-like noise |
+
+## The `api.emit()` Function
+
+The top-level entry point accepts any number of `Instance` references and recursively visits their descendants, dispatching each to the appropriate sub-module:
+
+| Instance type | Dispatched to |
+|---|---|
+| `ParticleEmitter` | `particle.emit` |
+| `Beam` | `beam.emit` |
+| `Trail` | `trail.Enabled = true` |
+| `RayValue` (screenshake tag) | `camera_shake.emit` |
+| `RayValue` (other) | `tween_property.emit` |
+| `Model` | `spin.emit` |
+| `BasePart` (Enabled attr) | `screen.emit` |
+| `Part` + Attachment (shockwave tag) in `Rings` | `shockwave_ring.emit` |
+| `Part` + Attachment (shockwave tag) in `Debris` | `shockwave_debris.emit` |
+| `Part` + Attachment (shockwave tag) in `Lines` | `shockwave_line.emit` |
+| Bezier-tagged object | `bezier.emit` |
+| Mesh VFX object | `mesh.emit` |
+
+`api.emit()` returns an environment table `{ Finished = Promise }` that resolves when all child effects complete. An optional leading `number` argument sets a legacy scale multiplier.
+
+```lua
+-- Fire a VFX hierarchy and wait for completion
+local env = ForgeVFX.emit(myVFXFolder)
+env.Finished:await()
+
+-- Fire with a scale of 1.5
+local env = ForgeVFX.emit(1.5, particleEmitter, beamInstance)
+```
+
+## `api.setenabled(attachment, value, duration)`
+
+A convenience helper that enables or disables all `ParticleEmitter` children of an attachment. An optional `duration` parameter re-disables them after the specified time:
+
+```lua
+-- Enable particles for 3 seconds then auto-disable
+ForgeVFX.setenabled(Character.HitAttachment, true, 3)
+```
+
+## Real Usage: JohnDoe ClientEffects
+
+JohnDoe's client-side ability effects use a higher-level `VFXManager` wrapper that internally calls `api.emit`. Here is the `PouncePunch` handler from `ClientEffects.luau`:
+
+```lua
+Handlers.PouncePunch = function(Data)
+    local Character: Model = Data.Character
+    if not (Character and Character.Parent and Data.VfxTemplate) then
+        return
+    end
+
+    local HandPart = Character:FindFirstChild("ClawArmBottom_low", true)
+        or Character:FindFirstChild("Right Arm")
+    if not HandPart then
+        return
+    end
+
+    VFXManager:FireVFXInParent(Data.VfxTemplate, {
+        Parent   = Data.VfxTemplate and HandPart,
+        Duration = Data.Duration,
+    })
+end
+```
+
+The `CorruptedFuryWallHit` handler demonstrates direct particle control without `VFXManager` — it clones a VFX template, positions it at the hit normal, and manually emits each `ParticleEmitter` with `:Emit(1)`:
+
+```lua
+Handlers.CorruptedFuryWallHit = function(Data)
+    local Vfx = Data.VfxTemplate:Clone()
+    Vfx.Parent = workspace
+    Vfx.CFrame = CFrame.lookAt(Data.ForwardHitPosition,
+        Data.ForwardHitPosition + Data.ForwardHitNormal)
+
+    local Attachment = Vfx:FindFirstChild("Attachment")
+    if Attachment then
+        for _, Descendant in Attachment:GetChildren() do
+            if Descendant:IsA("ParticleEmitter") then
+                Descendant.Enabled = false
+                Descendant.Rate    = 0
+                Descendant:Emit(1)
+            end
+        end
+    end
+
+    Debris:AddItem(Vfx, 1)
+end
+```
+
+## EffectHelpers (Higher-Level Wrapper)
+
+<Note>
+`ReplicatedStorage/Modules/Main/Helper/EffectHelpers.luau` (`FX`) is a Shattered Reality–specific helper layer used by character ability scripts. It provides convenience functions on top of ForgeVFX and Roblox services:
+
+- `FX.BodyVelocity(Part, Speed, TweenInfo, Duration, ...)` — attaches and auto-removes a `BodyVelocity` with wall-slide collision deflection
+- `FX.CCEffect(Brightness, TweenTime, TintColor, HoldTime)` — creates a `ColorCorrectionEffect` in `Lighting` and auto-fades it out
+- `FX.Blur(Size, TweenInfo, Duration)` — creates a `BlurEffect` with optional tween and duration
+- `FX.Vignette(Player)` — clones the vignette `ScreenGui` into the player's `PlayerGui`
+- `FX.CreateMarker(character, animId, markers)` — hooks animation marker signals for a given animation track
+- `FX.StopAllAnimations(Character)` / `FX.RemoveAllVelocity(Part)` — cleanup utilities
+
+`EffectHelpers` is not part of ForgeVFX itself and carries no VFX-DL license restriction — it is Shattered Reality proprietary code.
+</Note>

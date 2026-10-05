@@ -1,0 +1,110 @@
+{
+  "projectType": "saas",
+  "projectName": "Shattered Reality",
+  "projectDescription": "A Roblox asymmetric horror game built in Luau, featuring playable Killer and Survivor characters, multiple game modes, a custom networking layer (DeltaNetwork), server-side anticheat, moderation commands, and a rich VFX/ability system.",
+  "theme": "aspen",
+  "primaryColor": "#C0392B",
+  "lightColor": "#E74C3C",
+  "darkColor": "#7B0000",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Overview",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "architecture",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Game Systems",
+            "pages": [
+              "systems/round-lifecycle",
+              "systems/gamemodes",
+              "systems/status-effects",
+              "systems/hitbox-system"
+            ]
+          },
+          {
+            "group": "Characters",
+            "pages": [
+              "characters/overview",
+              "characters/killers",
+              "characters/survivors",
+              "characters/skins-emotes"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Development",
+        "groups": [
+          {
+            "group": "Networking",
+            "pages": [
+              "dev/delta-network",
+              "dev/character-replication",
+              "dev/projectiles"
+            ]
+          },
+          {
+            "group": "Adding Content",
+            "pages": [
+              "dev/adding-a-killer",
+              "dev/adding-a-survivor",
+              "dev/adding-a-map"
+            ]
+          },
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "dev/anticheat",
+              "dev/data-service",
+              "dev/mod-commands",
+              "dev/vfx-forge"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Asymmetric Killer-vs-Survivors gameplay with multiple distinct playable characters",
+    "Four game modes: Classic, Double Trouble, One Bounce, and Powerhouse",
+    "Custom DeltaNetwork serialisation layer for low-bandwidth, typed remote events and functions",
+    "Server-side anticheat with modular checks (speed-hacking, noclip, flinging, backshotting, flying)",
+    "Twelve stackable status effects (Bleed, Burn, Poison, Slowness, Speed, Stunned, Regeneration, etc.)",
+    "Rewind-based lag-compensated hitbox system with client-snapshot buffering",
+    "ForgeVFX integration for beams, camera shake, shockwaves, particles, and screen effects",
+    "Moderation command panel with role-gated admin commands for private and public servers",
+    "ProfileStore-backed persistent player data with granular per-player settings",
+    "Character skin system with per-skin Config and optional Behavior overrides",
+    "Sprint/stamina system configurable per character with per-gamemode modifiers",
+    "Terror-radius proximity audio system with layered chase music"
+  ],
+  "publicApiSurface": [
+    "DeltaNetwork.Event(name, ...ArgTypes) → DeltaType",
+    "DeltaNetwork.Function(name, inputTypes, outputTypes) → DeltaType",
+    "DeltaNetwork.String / Number / Boolean / Instance / CFrameF24U8 / Vector3F24 / NumberF16 (built-in types)",
+    "DeltaType:Server:Connect(cb: (Player, ...any) -> ())",
+    "DeltaType:Client:Connect(cb: (...any) -> ())",
+    "DeltaType:RateLimit(config: {MaxCalls, WindowSeconds})",
+    "DeltaType:UseMiddleware(fn: (Player?, ...any) -> (boolean, string?))",
+    "DeltaType:BroadcastExcept(excludedPlayer, ...any)",
+    "DeltaType:BatchBroadcast(players, ...any)",
+    "Anticheat.new(config) → Anticheat",
+    "Anticheat:RegisterCheck(name, module)",
+    "Anticheat:EnableCheck(name) / DisableCheck(name)",
+    "Hitbox.new(config) → Hitbox",
+    "Hitbox.Shapes.Box / Circle / Radius",
+    "StatusManager.Apply(character, effectName, level, duration)",
+    "RoundService gamemodes: Classic, DoubleKiller, OneBounce, Powerhouse",
+    "Killer Config fields: Info, Class, SprintConfig, AbilityInfo, ChaseConfig, Animations",
+    "Survivor Config fields: Info, SprintConfig, AbilityInfo, PassiveInfo, Animations",
+    "Skin Config fields: DisplayName, ActorType, CharacterName, SkinName",
+    "Admin commands: BanPlayer, KickPlayer, UnbanPlayer, ForceNextKiller, ForceNextMap, ForceNextGamemode, ForceEndRound, GiveStatus, SetPlayerRole, SpawnCharacter, SendAnnouncement"
+  ]
+}
